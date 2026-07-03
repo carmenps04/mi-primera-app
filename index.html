@@ -507,13 +507,14 @@
               </select>
               {isMobile && <button className="share-btn" style={{marginLeft:"auto"}} onClick={()=>setShowExport(true)}><ShareIcon/></button>}
             </div>
-            <div style={{display:"flex",background:"rgba(0,0,0,0.06)",borderRadius:8,padding:2,gap:2,width:isMobile?"100%":"auto",minWidth:0}}>
-              {[{v:"dashboard",icon:"🏠",l:"Inicio",lm:"Inicio"},{v:"list",icon:"📋",l:"Movimientos",lm:"Mov."},{v:"stats",icon:"📊",l:"Estadísticas",lm:"Estad."}].map(({v,icon,l,lm})=>(
+            <div style={{display:"flex",background:"rgba(0,0,0,0.06)",borderRadius:8,padding:2,gap:2,width:isMobile?"100%":"auto",minWidth:0,overflow:"hidden"}}>
+              {[{v:"dashboard",icon:"🏠",l:"Inicio"},{v:"list",icon:"📋",l:"Movimientos"},{v:"stats",icon:"📊",l:"Estadísticas"}].map(({v,icon,l})=>(
                 <button key={v} className={`tab-btn${view===v?" tab-active":""}`}
-                  style={{flex:isMobile?1:"none",flexDirection:isMobile?"column":"row",padding:isMobile?"6px 4px":"4px 14px",gap:isMobile?2:5,minWidth:0}}
+                  aria-label={l} title={l}
+                  style={{flex:isMobile?1:"none",flexDirection:isMobile?"column":"row",padding:isMobile?"8px 4px":"4px 14px",gap:isMobile?0:5,minWidth:0}}
                   onClick={()=>setView(v)}>
-                  <span style={{fontSize:isMobile?15:13}}>{icon}</span>
-                  <span style={{fontSize:isMobile?10:12,whiteSpace:"nowrap"}}>{isMobile?lm:l}</span>
+                  <span style={{fontSize:isMobile?17:13}}>{icon}</span>
+                  {!isMobile && <span style={{fontSize:12,whiteSpace:"nowrap"}}>{l}</span>}
                 </button>
               ))}
             </div>
