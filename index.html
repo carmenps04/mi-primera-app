@@ -497,8 +497,8 @@
           )}
 
           {/* Toolbar */}
-          <div style={{background:"rgba(246,246,246,0.97)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(0,0,0,0.08)",flexShrink:0,display:"flex",flexDirection:isMobile?"column":"row",alignItems:isMobile?"stretch":"center",justifyContent:"space-between",padding:isMobile?"8px 12px":"0 16px",gap:isMobile?8:0,minHeight:isMobile?"auto":46}}>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{background:"rgba(246,246,246,0.97)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(0,0,0,0.08)",flexShrink:0,display:"flex",flexDirection:isMobile?"column":"row",alignItems:isMobile?"stretch":"center",justifyContent:"space-between",padding:isMobile?"8px 12px":"0 16px",gap:isMobile?8:0,minHeight:isMobile?"auto":46,minWidth:0}}>
+            <div style={{display:"flex",gap:8,alignItems:"center",minWidth:0}}>
               <select style={{height:34,padding:"0 24px 0 10px",borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238E8E93'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 8px center",fontSize:14,fontFamily:"inherit",color:"#1d1d1f",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}} value={month} onChange={e=>{setMonth(+e.target.value);setFocus(null);}}>
                 {MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}
               </select>
@@ -507,13 +507,13 @@
               </select>
               {isMobile && <button className="share-btn" style={{marginLeft:"auto"}} onClick={()=>setShowExport(true)}><ShareIcon/></button>}
             </div>
-            <div style={{display:"flex",background:"rgba(0,0,0,0.06)",borderRadius:8,padding:2,gap:2,width:isMobile?"100%":"auto"}}>
+            <div style={{display:"flex",background:"rgba(0,0,0,0.06)",borderRadius:8,padding:2,gap:2,width:isMobile?"100%":"auto",minWidth:0}}>
               {[{v:"dashboard",icon:"🏠",l:"Inicio"},{v:"list",icon:"📋",l:"Movimientos"},{v:"stats",icon:"📊",l:"Estadísticas"}].map(({v,icon,l})=>(
                 <button key={v} className={`tab-btn${view===v?" tab-active":""}`}
-                  style={{flex:isMobile?1:"none",flexDirection:isMobile?"column":"row",padding:isMobile?"6px 4px":"4px 14px",gap:isMobile?2:5}}
+                  style={{flex:isMobile?1:"none",flexDirection:isMobile?"column":"row",padding:isMobile?"6px 4px":"4px 14px",gap:isMobile?2:5,minWidth:0}}
                   onClick={()=>setView(v)}>
                   <span style={{fontSize:isMobile?15:13}}>{icon}</span>
-                  <span style={{fontSize:isMobile?10:12}}>{l}</span>
+                  <span style={{fontSize:isMobile?10:12,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"100%"}}>{l}</span>
                 </button>
               ))}
             </div>
