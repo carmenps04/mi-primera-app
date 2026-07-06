@@ -20,7 +20,6 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -55,6 +54,144 @@
         };
         s1.onerror = rej; document.head.appendChild(s1);
       });
+    }
+
+    let excelJSLoaded = false;
+    function loadExcelJS() {
+      if (excelJSLoaded) return Promise.resolve();
+      return new Promise((res, rej) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js";
+        s.onload = () => { excelJSLoaded = true; res(); };
+        s.onerror = rej; document.head.appendChild(s);
+      });
+    }
+
+    let firebaseLoaded = null;
+    // Carga el SDK de Firebase (compat, para poder usarlo con <script> sueltos sin bundler)
+    // e inicializa la app con la configuración incrustada en el propio código de sincronización.
+    function loadFirebase(config) {
+      if (firebaseLoaded) return firebaseLoaded;
+      firebaseLoaded = new Promise((res, rej) => {
+        const s1 = document.createElement("script");
+        s1.src = "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js";
+        s1.onload = () => {
+          const s2 = document.createElement("script");
+          s2.src = "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js";
+          s2.onload = () => {
+            try {
+              firebase.initializeApp(config);
+              const db = firebase.firestore();
+              db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+              res(db);
+            } catch (e) { rej(e); }
+          };
+          s2.onerror = rej; document.head.appendChild(s2);
+        };
+        s1.onerror = rej; document.head.appendChild(s1);
+      });
+      return firebaseLoaded;
+    }
+
+    // ─── Descarga/compartir de archivos exportados ─────────────────────────────────
+    // En iOS/iPadOS, cuando la app está instalada (modo standalone, abierta desde el
+    // icono en pantalla de inicio), el truco clásico de <a download> con un blob: URL
+    // no funciona — el archivo "se descarga" pero no hay forma de abrirlo. La solución
+    // fiable es usar la Web Share API (hoja de compartir nativa, con opción "Guardar en
+    // Archivos"), y sólo caer de vuelta al <a download> en escritorio/Android.
+    // IMPORTANTE: navigator.share() debe llamarse de forma síncrona dentro del propio
+    // gestor del clic del usuario; si hay un await antes, Safari lo bloquea con
+    // NotAllowedError por "falta de gesto de usuario". Por eso el blob se genera antes
+    // y esta función se invoca directamente en el onClick del botón "Guardar archivo".
+    function isStandalonePWA() {
+      return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+    }
+    async function downloadOrShare(blob, filename, mime) {
+      if (navigator.canShare) {
+        try {
+          const file = new File([blob], filename, { type: mime });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file] });
+            return "shared";
+          }
+        } catch (e) {
+          if (e && e.name === "AbortError") return "cancelled";
+          // sigue con la descarga clásica como último recurso
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      return "downloaded";
+    }
+
+    // ─── Gráfico Ingresos/Gastos rasterizado (para incrustar en PDF y Excel) ───────
+    function buildIncomeExpenseChartPNG(totalIncome, totalExpense) {
+      const scale = 2, W = 320, H = 190;
+      const canvas = document.createElement("canvas");
+      canvas.width = W * scale; canvas.height = H * scale;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(scale, scale);
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
+      const total = totalIncome + totalExpense;
+      const cx = H / 2, cy = H / 2, r = H / 2 - 18, lw = r * 0.36;
+      ctx.lineWidth = lw; ctx.lineCap = "butt";
+      if (total <= 0) {
+        ctx.strokeStyle = "#E5E5EA";
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      } else {
+        const start = -Math.PI / 2, incAngle = (totalIncome / total) * Math.PI * 2;
+        ctx.strokeStyle = "#82B79A";
+        ctx.beginPath(); ctx.arc(cx, cy, r, start, start + incAngle); ctx.stroke();
+        ctx.strokeStyle = "#E0918A";
+        ctx.beginPath(); ctx.arc(cx, cy, r, start + incAngle, start + Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = "#8E8E93"; ctx.font = "12px Arial"; ctx.textAlign = "center";
+      ctx.fillText("Total", cx, cy - 6);
+      ctx.fillStyle = "#1d1d1f"; ctx.font = "bold 15px Arial";
+      ctx.fillText(fmt(total), cx, cy + 14);
+      ctx.textAlign = "left";
+      const lx = cx + r + 34;
+      ctx.fillStyle = "#82B79A"; ctx.fillRect(lx, cy - 40, 13, 13);
+      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Ingresos", lx + 19, cy - 30);
+      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalIncome), lx + 19, cy - 12);
+      ctx.fillStyle = "#E0918A"; ctx.fillRect(lx, cy + 10, 13, 13);
+      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Gastos", lx + 19, cy + 20);
+      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalExpense), lx + 19, cy + 38);
+      return { dataUrl: canvas.toDataURL("image/png"), width: W, height: H };
+    }
+
+    // ─── Sincronización entre dispositivos (código de sincronización) ─────────────
+    // El código incluye la configuración de Firebase (pública por diseño, como
+    // cualquier config de app cliente) más un identificador de "sala" aleatorio, todo
+    // codificado en base64. Así basta con copiar un único código a los demás
+    // dispositivos: no hay que tocar el código fuente ni crear cuentas en cada uno.
+    function makeRoomId() {
+      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      let s = ""; for (let i = 0; i < 12; i++) s += chars[Math.floor(Math.random() * chars.length)];
+      return s;
+    }
+    function encodeSyncCode(firebaseConfig, room) {
+      return btoa(unescape(encodeURIComponent(JSON.stringify({ c: firebaseConfig, r: room }))));
+    }
+    function decodeSyncCode(code) {
+      try {
+        const obj = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+        if (!obj || !obj.c || !obj.r) return null;
+        return { config: obj.c, room: obj.r };
+      } catch { return null; }
+    }
+    // Extrae los campos de la config de Firebase tanto si se pega el objeto JS
+    // literal (tal cual lo muestra la consola de Firebase) como si se pega JSON.
+    function parseFirebaseConfigSnippet(text) {
+      const cfg = {};
+      ["apiKey", "authDomain", "projectId", "storageBucket", "messagingSenderId", "appId"].forEach((k) => {
+        const m = text.match(new RegExp(k + "\\s*:\\s*[\"']([^\"']+)[\"']"));
+        if (m) cfg[k] = m[1];
+      });
+      return cfg;
     }
 
     const DEFAULT_EXPENSE_CATS = [
@@ -109,8 +246,9 @@
     function ExportModal({ month, year, entries, annualData, expCats, incCats, statsYear, onClose }) {
       const [sections,setSections]=useState({balance:true,movimientos:true,estadisticas:true});
       const [format,setFormat]=useState("pdf");
-      const [loading,setLoading]=useState(false);
-      const [done,setDone]=useState(false);
+      const [stage,setStage]=useState("config"); // config | generating | ready | done
+      const [errMsg,setErrMsg]=useState("");
+      const fileRef=useRef(null);
       const allCats=[...expCats,...incCats];
       const getCat=(id)=>allCats.find(c=>c.id===id)||expCats[expCats.length-1];
       const totalExpense=entries.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
@@ -118,26 +256,65 @@
       const balance=totalIncome-totalExpense;
       const toggle=(k)=>setSections(p=>({...p,[k]:!p[k]}));
       const anySelected=Object.values(sections).some(Boolean);
+      const concept=(e)=>`${getCat(e.category).label} — ${e.description}`;
 
-      const exportExcel=()=>{
-        const wb=XLSX.utils.book_new();
+      // Precarga la librería del formato elegido en cuanto se abre/cambia, para que
+      // generar el archivo al pulsar "Exportar" sea prácticamente instantáneo.
+      useEffect(()=>{ (format==="pdf"?loadJsPDF():loadExcelJS()).catch(()=>{}); },[format]);
+
+      const buildExcel=async()=>{
+        await loadExcelJS();
+        const wb=new ExcelJS.Workbook();
         if(sections.balance){
-          const rows=[["Resumen",`${MONTHS[month]} ${year}`],[],["Ingresos totales",totalIncome],["Gastos totales",totalExpense],["Balance",balance]];
-          XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),"Balance");
+          const ws=wb.addWorksheet("Balance");
+          ws.columns=[{width:22},{width:18}];
+          ws.addRow(["Resumen",`${MONTHS[month]} ${year}`]).font={bold:true};
+          ws.addRow([]);
+          ws.addRow(["Ingresos totales",totalIncome]);
+          ws.addRow(["Gastos totales",totalExpense]);
+          ws.addRow(["Balance",balance]).font={bold:true};
+          ws.getColumn(2).numFmt='#,##0.00" €"';
         }
-        if(sections.movimientos&&entries.length>0){
-          const rows=entries.map(e=>({Fecha:new Date(e.date).toLocaleDateString("es-ES"),Descripción:e.description,Tipo:e.type==="expense"?"Gasto":"Ingreso",Categoría:getCat(e.category).label,"Importe (€)":e.type==="expense"?-e.amount:e.amount}));
-          XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Movimientos");
+        if(sections.movimientos){
+          const ws=wb.addWorksheet("Movimientos");
+          ws.columns=[{width:12},{width:32},{width:14},{width:4},{width:12},{width:32},{width:14}];
+          const chart=buildIncomeExpenseChartPNG(totalIncome,totalExpense);
+          const imgId=wb.addImage({base64:chart.dataUrl,extension:"png"});
+          ws.addImage(imgId,{tl:{col:0,row:0},ext:{width:chart.width,height:chart.height}});
+          const top=12; // filas reservadas para el gráfico
+          const hRow=ws.getRow(top);
+          hRow.values=["Gastos","","","","Ingresos","",""];
+          ws.mergeCells(top,1,top,3); ws.mergeCells(top,5,top,7);
+          ws.getCell(top,1).font={bold:true,color:{argb:"FFE0918A"}};
+          ws.getCell(top,5).font={bold:true,color:{argb:"FF82B79A"}};
+          ws.getRow(top+1).values=["Fecha","Concepto","Importe","","Fecha","Concepto","Importe"];
+          ws.getRow(top+1).font={bold:true};
+          const expRows=entries.filter(e=>e.type==="expense");
+          const incRows=entries.filter(e=>e.type==="income");
+          const maxLen=Math.max(expRows.length,incRows.length);
+          for(let i=0;i<maxLen;i++){
+            const row=ws.getRow(top+2+i);
+            const e=expRows[i], inc=incRows[i];
+            if(e){ row.getCell(1).value=new Date(e.date).toLocaleDateString("es-ES"); row.getCell(2).value=concept(e); row.getCell(3).value=e.amount; }
+            if(inc){ row.getCell(5).value=new Date(inc.date).toLocaleDateString("es-ES"); row.getCell(6).value=concept(inc); row.getCell(7).value=inc.amount; }
+          }
+          if(maxLen===0) ws.getCell(top+2,1).value="Sin movimientos.";
+          ws.getColumn(3).numFmt='#,##0.00" €"'; ws.getColumn(7).numFmt='#,##0.00" €"';
         }
         if(sections.estadisticas&&annualData.length>0){
-          const ws=XLSX.utils.json_to_sheet(annualData.map(d=>({Mes:d.label,"Ingresos (€)":d.income,"Gastos (€)":d.expense,"Balance (€)":d.balance})));
-          XLSX.utils.book_append_sheet(wb,ws,`Estadísticas ${statsYear}`);
+          const ws=wb.addWorksheet(`Estadísticas ${statsYear}`);
+          ws.columns=[{width:12},{width:14},{width:14},{width:14}];
+          ws.addRow(["Mes","Ingresos","Gastos","Balance"]).font={bold:true};
+          annualData.forEach(d=>ws.addRow([d.label,d.income,d.expense,d.balance]));
+          const tI=annualData.reduce((s,d)=>s+d.income,0),tE=annualData.reduce((s,d)=>s+d.expense,0);
+          ws.addRow(["TOTAL",tI,tE,tI-tE]).font={bold:true};
+          [2,3,4].forEach(c=>ws.getColumn(c).numFmt='#,##0.00" €"');
         }
-        XLSX.writeFile(wb,`finanzas_${MONTHS[month]}_${year}.xlsx`);
-        setDone(true);
+        const buffer=await wb.xlsx.writeBuffer();
+        return { blob:new Blob([buffer],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}), filename:`finanzas_${MONTHS[month]}_${year}.xlsx`, mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
       };
 
-      const exportPDF=async()=>{
+      const buildPDF=async()=>{
         await loadJsPDF();
         const {jsPDF}=window.jspdf;
         const doc=new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
@@ -147,34 +324,71 @@
         doc.setFontSize(16);doc.setFont(undefined,"bold");doc.setTextColor(29,29,31);doc.text("Finanzas Personales",14,y);y+=8;
         doc.setFontSize(10);doc.setFont(undefined,"normal");doc.setTextColor(130,130,130);doc.text(`${MONTHS[month]} ${year}  ·  ${new Date().toLocaleDateString("es-ES")}`,14,y);y+=10;
         if(sections.balance){
-          pb(50);heading("Resumen");
-          doc.autoTable({startY:y,head:[["Concepto","Importe"]],body:[["Ingresos",fmt(totalIncome)],["Gastos",fmt(totalExpense)],["Balance",fmt(balance)]],headStyles:{fillColor:[29,29,31],textColor:255,fontSize:9},bodyStyles:{fontSize:9},columnStyles:{1:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]},margin:{left:14,right:14}});
-          y=doc.lastAutoTable.finalY+8;
+          pb(55);heading("Resumen");
+          const chart=buildIncomeExpenseChartPNG(totalIncome,totalExpense);
+          const imgW=88, imgH=imgW*(chart.height/chart.width);
+          doc.addImage(chart.dataUrl,"PNG",14,y,imgW,imgH);
+          doc.autoTable({startY:y,margin:{left:14+imgW+8,right:14},head:[["Concepto","Importe"]],body:[["Ingresos",fmt(totalIncome)],["Gastos",fmt(totalExpense)],["Balance",fmt(balance)]],headStyles:{fillColor:[29,29,31],textColor:255,fontSize:9},bodyStyles:{fontSize:9},columnStyles:{1:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]}});
+          y=Math.max(doc.lastAutoTable.finalY,y+imgH)+8;
         }
         if(sections.movimientos){
           pb(40);heading("Movimientos");
-          if(entries.length===0){doc.setFontSize(9);doc.setTextColor(130,130,130);doc.text("Sin movimientos.",14,y);y+=6;}
-          else{doc.autoTable({startY:y,head:[["Fecha","Descripción","Tipo","Categoría","Importe"]],body:entries.map(e=>[new Date(e.date).toLocaleDateString("es-ES"),e.description,e.type==="expense"?"Gasto":"Ingreso",getCat(e.category).label,(e.type==="expense"?"-":"+")+fmt(e.amount)]),headStyles:{fillColor:[29,29,31],textColor:255,fontSize:8},bodyStyles:{fontSize:8},columnStyles:{4:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]},margin:{left:14,right:14},didParseCell:(d)=>{if(d.section==="body"&&d.column.index===4)d.cell.styles.textColor=d.cell.raw.startsWith("-")?[255,59,48]:[52,199,89];}});y=doc.lastAutoTable.finalY+8;}
+          const expRows=entries.filter(e=>e.type==="expense").map(e=>[new Date(e.date).toLocaleDateString("es-ES"),concept(e),fmt(e.amount)]);
+          const incRows=entries.filter(e=>e.type==="income").map(e=>[new Date(e.date).toLocaleDateString("es-ES"),concept(e),fmt(e.amount)]);
+          if(expRows.length===0&&incRows.length===0){doc.setFontSize(9);doc.setTextColor(130,130,130);doc.text("Sin movimientos.",14,y);y+=6;}
+          else{
+            const gap=6, halfW=(W-14*2-gap)/2, leftX=14, rightX=14+halfW+gap;
+            const startY=y;
+            doc.setFontSize(10);doc.setTextColor(224,145,138);doc.setFont(undefined,"bold");doc.text("Gastos",leftX,startY);
+            doc.setTextColor(130,183,154);doc.text("Ingresos",rightX,startY);
+            doc.setFont(undefined,"normal");doc.setTextColor(29,29,31);
+            const tblY=startY+3;
+            doc.autoTable({startY:tblY,margin:{left:leftX,right:W-leftX-halfW},tableWidth:halfW,head:[["Fecha","Concepto","Importe"]],body:expRows.length?expRows:[["—","Sin gastos","—"]],headStyles:{fillColor:[224,145,138],textColor:255,fontSize:7},bodyStyles:{fontSize:7},columnStyles:{2:{halign:"right",textColor:[224,145,138]}},alternateRowStyles:{fillColor:[245,245,247]}});
+            const finalY1=doc.lastAutoTable.finalY;
+            doc.autoTable({startY:tblY,margin:{left:rightX,right:14},tableWidth:halfW,head:[["Fecha","Concepto","Importe"]],body:incRows.length?incRows:[["—","Sin ingresos","—"]],headStyles:{fillColor:[130,183,154],textColor:255,fontSize:7},bodyStyles:{fontSize:7},columnStyles:{2:{halign:"right",textColor:[130,183,154]}},alternateRowStyles:{fillColor:[245,245,247]}});
+            const finalY2=doc.lastAutoTable.finalY;
+            y=Math.max(finalY1,finalY2)+8;
+          }
         }
         if(sections.estadisticas){
           pb(50);heading(`Estadísticas ${statsYear}`);
           const tI=annualData.reduce((s,d)=>s+d.income,0),tE=annualData.reduce((s,d)=>s+d.expense,0);
           doc.autoTable({startY:y,head:[["Mes","Ingresos","Gastos","Balance"]],body:[...annualData.map(d=>[d.label,fmt(d.income),fmt(d.expense),fmt(d.balance)]),["TOTAL",fmt(tI),fmt(tE),fmt(tI-tE)]],headStyles:{fillColor:[29,29,31],textColor:255,fontSize:9},bodyStyles:{fontSize:9},columnStyles:{1:{halign:"right"},2:{halign:"right"},3:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]},margin:{left:14,right:14}});
         }
-        doc.save(`finanzas_${MONTHS[month]}_${year}.pdf`);
-        setDone(true);
+        const blob=doc.output("blob");
+        return { blob, filename:`finanzas_${MONTHS[month]}_${year}.pdf`, mime:"application/pdf" };
       };
 
-      const handleExport=async()=>{ if(!anySelected)return; setLoading(true); try{if(format==="pdf")await exportPDF();else exportExcel();}catch(e){console.error(e);} setLoading(false); };
+      const handleGenerate=async()=>{
+        if(!anySelected)return; setStage("generating"); setErrMsg("");
+        try{
+          const file=format==="pdf"?await buildPDF():await buildExcel();
+          fileRef.current=file; setStage("ready");
+        }catch(e){ console.error(e); setErrMsg("No se pudo generar el archivo. Comprueba tu conexión e inténtalo de nuevo."); setStage("config"); }
+      };
+
+      const handleSave=async()=>{
+        if(!fileRef.current)return;
+        const res=await downloadOrShare(fileRef.current.blob,fileRef.current.filename,fileRef.current.mime);
+        if(res!=="cancelled") setStage("done");
+      };
 
       return (
         <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
           <div style={{...ms.modal,width:"min(380px,95vw)"}}>
             <div style={ms.header}><span style={ms.title}>Exportar informe</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
-            {done?(
+            {stage==="done"?(
               <div style={{textAlign:"center",padding:"20px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
-                <div style={{fontSize:36}}>✅</div><div style={{fontSize:14,fontWeight:600,color:"#1d1d1f"}}>Archivo descargado</div>
+                <div style={{fontSize:36}}>✅</div><div style={{fontSize:14,fontWeight:600,color:"#1d1d1f"}}>Archivo guardado</div>
                 <button style={ms.saveBtn} onClick={onClose}>Cerrar</button>
+              </div>
+            ):stage==="ready"?(
+              <div style={{textAlign:"center",padding:"20px 0",display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+                <div style={{fontSize:36}}>📄</div>
+                <div style={{fontSize:14,fontWeight:600,color:"#1d1d1f"}}>Tu archivo está listo</div>
+                <div style={{fontSize:12,color:"#8E8E93",textAlign:"center"}}>Pulsa el botón para guardarlo o compartirlo. En iPhone/iPad se abrirá la hoja para compartir (elige "Guardar en Archivos" o la app donde quieras abrirlo).</div>
+                <button style={ms.saveBtn} onClick={handleSave}>Guardar / Compartir archivo</button>
+                <button style={{...ms.cancelBtn,marginTop:-2}} onClick={()=>setStage("config")}>Volver</button>
               </div>
             ):(
               <>
@@ -187,7 +401,7 @@
                 </div>
                 <div><div style={ms.sLbl}>Secciones</div>
                   <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                    {[["balance",`📊 Balance — ${MONTHS[month]} ${year}`],["movimientos",`📋 Movimientos — ${MONTHS[month]} ${year}`],["estadisticas",`📈 Estadísticas ${statsYear}`]].map(([key,lbl])=>(
+                    {[["balance",`📊 Balance — ${MONTHS[month]} ${year}`],["movimientos",`📋 Movimientos (gastos e ingresos) — ${MONTHS[month]} ${year}`],["estadisticas",`📈 Estadísticas ${statsYear}`]].map(([key,lbl])=>(
                       <label key={key} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:8,border:`1.5px solid ${sections[key]?"#007AFF":"rgba(0,0,0,0.1)"}`,background:sections[key]?"#F0F6FF":"white",cursor:"pointer",userSelect:"none"}}>
                         <input type="checkbox" checked={sections[key]} onChange={()=>toggle(key)} style={{width:16,height:16,accentColor:"#007AFF",cursor:"pointer"}}/>
                         <span style={{fontSize:13,fontWeight:500,color:"#1d1d1f"}}>{lbl}</span>
@@ -195,10 +409,11 @@
                     ))}
                   </div>
                   {!anySelected&&<div style={{fontSize:11,color:"#E0918A",marginTop:6}}>Selecciona al menos una sección.</div>}
+                  {errMsg&&<div style={{fontSize:11,color:"#E0918A",marginTop:6}}>{errMsg}</div>}
                 </div>
                 <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
                   <button style={ms.cancelBtn} onClick={onClose}>Cancelar</button>
-                  <button style={{...ms.saveBtn,opacity:(!anySelected||loading)?0.5:1}} onClick={handleExport} disabled={!anySelected||loading}>{loading?"Generando...":"Exportar"}</button>
+                  <button style={{...ms.saveBtn,opacity:(!anySelected||stage==="generating")?0.5:1}} onClick={handleGenerate} disabled={!anySelected||stage==="generating"}>{stage==="generating"?"Generando...":"Exportar"}</button>
                 </div>
               </>
             )}
@@ -235,7 +450,12 @@
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{ICON_OPTIONS.map(ic=>(<button key={ic} style={{width:28,height:28,borderRadius:6,border:`2px solid ${icon===ic?"#007AFF":"transparent"}`,background:icon===ic?"#E8F0FF":"white",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setIcon(ic)}>{ic}</button>))}</div>
                 </div>
                 <div><div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Color</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:96}}>{PALETTE.map(col=>(<button key={col} style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${color===col?"#1d1d1f":"transparent"}`,background:col,cursor:"pointer"}} onClick={()=>setColor(col)}/>))}</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:120,alignItems:"center"}}>
+                    {PALETTE.map(col=>(<button key={col} style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${color===col?"#1d1d1f":"transparent"}`,background:col,cursor:"pointer"}} onClick={()=>setColor(col)}/>))}
+                    <label title="Color personalizado" style={{position:"relative",width:20,height:20,borderRadius:"50%",cursor:"pointer",border:`2px solid ${!PALETTE.includes(color)?"#1d1d1f":"transparent"}`,background:!PALETTE.includes(color)?color:"conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}}/>
+                    </label>
+                  </div>
                 </div>
               </div>
               {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
@@ -293,6 +513,122 @@
           </div>
         </div>
       );
+    }
+
+    // ─── SyncModal ────────────────────────────────────────────────────────────────
+    function SyncModal({ syncCode, syncStatus, onActivate, onDeactivate, onClose }) {
+      const [mode,setMode]=useState(syncCode?"status":"choose");
+      const [cfgText,setCfgText]=useState("");
+      const [joinText,setJoinText]=useState("");
+      const [generated,setGenerated]=useState("");
+      const [err,setErr]=useState("");
+      const [copied,setCopied]=useState(false);
+      const rulesSnippet="rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}";
+
+      const handleCreate=()=>{
+        const cfg=parseFirebaseConfigSnippet(cfgText);
+        if(!cfg.apiKey||!cfg.projectId){ setErr("No se han encontrado los datos necesarios. Pega el bloque de configuración completo tal como lo muestra Firebase."); return; }
+        setErr(""); setGenerated(encodeSyncCode(cfg,makeRoomId()));
+      };
+      const handleJoin=()=>{
+        const decoded=decodeSyncCode(joinText);
+        if(!decoded){ setErr("Ese código no es válido. Cópialo tal cual desde el otro dispositivo."); return; }
+        setErr(""); onActivate(joinText.trim());
+      };
+      const copyGenerated=async()=>{ try{ await navigator.clipboard.writeText(generated); setCopied(true); setTimeout(()=>setCopied(false),1500); }catch{} };
+      const shareGenerated=async()=>{ if(navigator.share){ try{ await navigator.share({title:"Código de sincronización — Finanzas",text:generated}); }catch{} } else copyGenerated(); };
+
+      return (
+        <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div style={{...ms.modal,width:"min(440px,95vw)"}}>
+            <div style={ms.header}><span style={ms.title}>Sincronizar entre dispositivos</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
+
+            {mode==="status"&&(
+              <>
+                <div style={{background:"#F0FFF4",border:"1px solid rgba(130,183,154,0.3)",borderRadius:10,padding:12,display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:20}}>{syncStatus==="on"?"🟢":syncStatus==="connecting"?"🟡":"🔴"}</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f"}}>{syncStatus==="on"?"Sincronización activa":syncStatus==="connecting"?"Conectando...":"Sin conexión al servicio"}</div>
+                    <div style={{fontSize:11,color:"#8E8E93"}}>Los cambios se comparten con cualquier dispositivo que use el mismo código.</div>
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:"#8E8E93"}}>Trata tu código de sincronización como una contraseña: quien lo tenga puede ver y modificar tus datos.</div>
+                <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                  <button style={ms.deleteBtn} onClick={onDeactivate}>Desactivar</button>
+                  <div style={{display:"flex",gap:8}}>
+                    <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Cambiar código</button>
+                    <button style={ms.saveBtn} onClick={onClose}>Cerrar</button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {mode==="choose"&&(
+              <>
+                <div style={{fontSize:13,color:"#3a3a3c",lineHeight:1.5}}>Para ver los mismos gastos e ingresos en tu PC, iPhone y iPad, todos los dispositivos deben usar el mismo <b>código de sincronización</b>.</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  <button style={{...ms.saveBtn,padding:"12px 0"}} onClick={()=>setMode("create")}>Crear sincronización nueva (primer dispositivo)</button>
+                  <button style={{...ms.cancelBtn,padding:"12px 0"}} onClick={()=>setMode("join")}>Ya tengo un código de otro dispositivo</button>
+                </div>
+                {syncCode&&<button style={ms.cancelBtn} onClick={()=>setMode("status")}>Volver</button>}
+              </>
+            )}
+
+            {mode==="create"&&(
+              <>
+                <div style={{fontSize:12,color:"#3a3a3c",lineHeight:1.6}}>
+                  Sólo hace falta hacerlo <b>una vez</b>, en un único dispositivo:
+                  <ol style={{margin:"6px 0 0 18px",padding:0}}>
+                    <li>Entra en <b>console.firebase.google.com</b> y crea un proyecto gratuito.</li>
+                    <li>Ve a <b>Compilación → Firestore Database</b> y pulsa "Crear base de datos" (modo producción, cualquier región).</li>
+                    <li>En la pestaña <b>Reglas</b>, sustituye el contenido por el texto de abajo y publica.</li>
+                    <li>Ve a <b>Configuración del proyecto → General</b>, añade una app web ({"</>"}) y copia el bloque de configuración.</li>
+                    <li>Pégalo aquí abajo.</li>
+                  </ol>
+                </div>
+                <pre style={{background:"#1d1d1f",color:"#82B79A",fontSize:10,padding:8,borderRadius:6,overflowX:"auto",margin:0,whiteSpace:"pre"}}>{rulesSnippet}</pre>
+                <textarea style={{...ms.inp,height:100,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} placeholder={'const firebaseConfig = {\n  apiKey: "...",\n  authDomain: "...",\n  ...\n};'} value={cfgText} onChange={e=>setCfgText(e.target.value)}/>
+                {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
+                {!generated?(
+                  <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                    <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Volver</button>
+                    <button style={ms.saveBtn} onClick={handleCreate}>Generar código</button>
+                  </div>
+                ):(
+                  <>
+                    <div style={{background:"#F9F9FB",border:"1px solid rgba(0,0,0,0.08)",borderRadius:10,padding:10}}>
+                      <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Copia este código en tus demás dispositivos:</div>
+                      <div style={{fontFamily:"monospace",fontSize:11,wordBreak:"break-all",color:"#1d1d1f",background:"white",border:"1px solid rgba(0,0,0,0.08)",borderRadius:6,padding:8}}>{generated}</div>
+                      <div style={{display:"flex",gap:8,marginTop:8}}>
+                        <button style={ms.cancelBtn} onClick={copyGenerated}>{copied?"¡Copiado!":"Copiar"}</button>
+                        <button style={ms.cancelBtn} onClick={shareGenerated}>Compartir</button>
+                      </div>
+                    </div>
+                    <button style={ms.saveBtn} onClick={()=>onActivate(generated)}>Activar en este dispositivo</button>
+                  </>
+                )}
+              </>
+            )}
+
+            {mode==="join"&&(
+              <>
+                <div style={{fontSize:12,color:"#3a3a3c"}}>Pega aquí el código que generaste en el otro dispositivo.</div>
+                <textarea style={{...ms.inp,height:90,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} value={joinText} onChange={e=>setJoinText(e.target.value)}/>
+                {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
+                <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+                  <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Volver</button>
+                  <button style={ms.saveBtn} onClick={handleJoin}>Unir este dispositivo</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    function CloudIcon({ status }) {
+      const color=status==="on"?"#82B79A":status==="connecting"?"#FF9F0A":"#8E8E93";
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a5 5 0 1 1 .71-9.95 6 6 0 0 1 11.34 2.5A4 4 0 0 1 20.5 19H18"/></svg>;
     }
 
     const ms={
@@ -435,6 +771,10 @@
       const [statsYear,setStatsYear]=useState(now.getFullYear());
       const [statsMode,setStatsMode]=useState("mensual");
       const [annualData,setAnnualData]=useState([]);
+      const [syncCode,setSyncCode]=useState(()=>localStorage.getItem("sync-code-v1")||"");
+      const [syncStatus,setSyncStatus]=useState("off"); // off | connecting | on | error
+      const [showSync,setShowSync]=useState(false);
+      const syncRef=useRef(null); // { db, room }
       const amtRef=useRef();
       const storageKey=`entries-${year}-${month}`, catKey="custom-categories";
 
@@ -450,8 +790,74 @@
         })();
       },[statsYear,entries,storageKey]);
 
-      const persist=async(list)=>{try{await window.storage.set(storageKey,JSON.stringify(list));}catch{}};
-      const persistCats=async(exp,inc)=>{try{await window.storage.set(catKey,JSON.stringify({exp,inc}));}catch{}};
+      // Conexión con Firebase a partir del código de sincronización guardado localmente.
+      useEffect(()=>{
+        if(!syncCode){ setSyncStatus("off"); return; }
+        const decoded=decodeSyncCode(syncCode);
+        if(!decoded){ setSyncStatus("error"); return; }
+        let cancelled=false;
+        setSyncStatus("connecting");
+        loadFirebase(decoded.config).then((db)=>{
+          if(cancelled)return;
+          syncRef.current={db,room:decoded.room};
+          setSyncStatus("on");
+        }).catch(()=>{ if(!cancelled) setSyncStatus("error"); });
+        return ()=>{cancelled=true;};
+      },[syncCode]);
+
+      // Escucha en tiempo real los movimientos del mes actual en el código compartido.
+      useEffect(()=>{
+        if(syncStatus!=="on"||!syncRef.current) return;
+        const {db,room}=syncRef.current;
+        const docRef=db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`);
+        const unsub=docRef.onSnapshot((snap)=>{
+          if(snap.exists){
+            const list=snap.data().entries||[];
+            setEntries(list);
+            localStorage.setItem(storageKey,JSON.stringify(list));
+          }else{
+            const local=JSON.parse(localStorage.getItem(storageKey)||"[]");
+            if(local.length) docRef.set({entries:local,updatedAt:Date.now()}).catch(()=>{});
+          }
+        },(e)=>console.warn("Sincronización (movimientos):",e));
+        return unsub;
+      },[syncStatus,storageKey,year,month]);
+
+      // Escucha en tiempo real las categorías personalizadas del código compartido.
+      useEffect(()=>{
+        if(syncStatus!=="on"||!syncRef.current) return;
+        const {db,room}=syncRef.current;
+        const docRef=db.collection("sync_v1").doc(room).collection("meta").doc("categories");
+        const unsub=docRef.onSnapshot((snap)=>{
+          if(snap.exists){
+            const data=snap.data();
+            if(data.exp) setExpCats(data.exp);
+            if(data.inc) setIncCats(data.inc);
+            localStorage.setItem(catKey,JSON.stringify({exp:data.exp,inc:data.inc}));
+          }else{
+            docRef.set({exp:expCats,inc:incCats,updatedAt:Date.now()}).catch(()=>{});
+          }
+        },(e)=>console.warn("Sincronización (categorías):",e));
+        return unsub;
+      },[syncStatus]);
+
+      const activateSync=(code)=>{ localStorage.setItem("sync-code-v1",code.trim()); location.reload(); };
+      const deactivateSync=()=>{ localStorage.removeItem("sync-code-v1"); location.reload(); };
+
+      const persist=async(list)=>{
+        try{await window.storage.set(storageKey,JSON.stringify(list));}catch{}
+        if(syncStatus==="on"&&syncRef.current){
+          const {db,room}=syncRef.current;
+          db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`).set({entries:list,updatedAt:Date.now()}).catch((e)=>console.warn(e));
+        }
+      };
+      const persistCats=async(exp,inc)=>{
+        try{await window.storage.set(catKey,JSON.stringify({exp,inc}));}catch{}
+        if(syncStatus==="on"&&syncRef.current){
+          const {db,room}=syncRef.current;
+          db.collection("sync_v1").doc(room).collection("meta").doc("categories").set({exp,inc,updatedAt:Date.now()}).catch((e)=>console.warn(e));
+        }
+      };
       const add=async()=>{
         if(!desc.trim()){setErr("Escribe una descripción.");return;}
         const a=parseFloat(amt.replace(",",".")); if(isNaN(a)||a<=0){setErr("Introduce un importe válido.");return;}
@@ -480,6 +886,7 @@
           {editing   &&<EditModal entry={editing} expCats={expCats} incCats={incCats} onSave={saveEdit} onDelete={del} onClose={()=>setEditing(null)} onCreateCat={saveCats}/>}
           {manageCat &&<CatManagerModal type={manageCat} expCats={expCats} incCats={incCats} onSave={saveCats} onClose={()=>setManageCat(null)}/>}
           {showExport&&<ExportModal month={month} year={year} entries={entries} annualData={annualData} expCats={expCats} incCats={incCats} statsYear={statsYear} onClose={()=>setShowExport(false)}/>}
+          {showSync  &&<SyncModal syncCode={syncCode} syncStatus={syncStatus} onActivate={activateSync} onDeactivate={deactivateSync} onClose={()=>setShowSync(false)}/>}
 
           {/* Titlebar: visible en tablet y desktop */}
           {!isMobile && (
@@ -492,9 +899,14 @@
                   </div>
                 : <div style={{width:54}}/>}
               <span style={{fontSize:13,fontWeight:500,color:"#3a3a3c",letterSpacing:0.1}}>Finanzas Personales — {MONTHS[month]} {year}</span>
-              <button className="share-btn" onClick={()=>setShowExport(true)} style={{width:"auto",padding:"0 10px",gap:6}}>
-                <ShareIcon/><span style={{fontSize:13,fontWeight:600}}>Exportar</span>
-              </button>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <button className="share-btn" title="Sincronizar entre dispositivos" onClick={()=>setShowSync(true)}>
+                  <CloudIcon status={syncStatus}/>
+                </button>
+                <button className="share-btn" onClick={()=>setShowExport(true)} style={{width:"auto",padding:"0 10px",gap:6}}>
+                  <ShareIcon/><span style={{fontSize:13,fontWeight:600}}>Exportar</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -509,9 +921,14 @@
               </select>
             </div>
             {isMobile && (
-              <button onClick={()=>setShowExport(true)} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:6,width:"100%",height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",color:"#3a3a3c",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                <ShareIcon/> Exportar informe
-              </button>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setShowSync(true)} title="Sincronizar entre dispositivos" style={{display:"flex",alignItems:"center",justifyContent:"center",width:44,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",flexShrink:0}}>
+                  <CloudIcon status={syncStatus}/>
+                </button>
+                <button onClick={()=>setShowExport(true)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",color:"#3a3a3c",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                  <ShareIcon/> Exportar informe
+                </button>
+              </div>
             )}
             <div style={{display:"flex",background:"rgba(0,0,0,0.06)",borderRadius:8,padding:2,gap:2,width:isMobile?"100%":"auto",minWidth:0}}>
               {[{v:"dashboard",icon:"🏠",l:"Inicio"},{v:"list",icon:"📋",l:"Movimientos"},{v:"stats",icon:"📊",l:"Estadísticas"}].map(({v,icon,l})=>(
