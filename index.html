@@ -578,7 +578,7 @@
     }
 
     // ─── SyncModal ────────────────────────────────────────────────────────────────
-    function SyncModal({ syncCode, syncStatus, onActivate, onDeactivate, onClose }) {
+    function SyncModal({ syncCode, syncStatus, syncError, onActivate, onDeactivate, onClose }) {
       const [mode,setMode]=useState(syncCode?"status":"choose");
       const [cfgText,setCfgText]=useState("");
       const [joinText,setJoinText]=useState("");
@@ -608,13 +608,16 @@
 
             {mode==="status"&&(
               <>
-                <div style={{background:"#F0FFF4",border:"1px solid rgba(130,183,154,0.3)",borderRadius:10,padding:12,display:"flex",alignItems:"center",gap:10}}>
+                <div style={{background:syncStatus==="error"?"#FFF0F0":"#F0FFF4",border:`1px solid ${syncStatus==="error"?"rgba(224,145,138,0.35)":"rgba(130,183,154,0.3)"}`,borderRadius:10,padding:12,display:"flex",alignItems:"center",gap:10}}>
                   <span style={{fontSize:20}}>{syncStatus==="on"?"🟢":syncStatus==="connecting"?"🟡":"🔴"}</span>
                   <div>
                     <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f"}}>{syncStatus==="on"?"Sincronización activa":syncStatus==="connecting"?"Conectando...":"Sin conexión al servicio"}</div>
                     <div style={{fontSize:11,color:"#8E8E93"}}>Los cambios se comparten con cualquier dispositivo que use el mismo código.</div>
                   </div>
                 </div>
+                {syncStatus==="error"&&syncError&&(
+                  <div style={{fontSize:12,color:"#B5493F",background:"#FFF0F0",border:"1px solid rgba(224,145,138,0.35)",borderRadius:8,padding:10,lineHeight:1.5}}>{syncError}</div>
+                )}
                 <div style={{fontSize:11,color:"#8E8E93"}}>Trata tu código de sincronización como una contraseña: quien lo tenga puede ver y modificar tus datos.</div>
                 <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
                   <button style={ms.deleteBtn} onClick={onDeactivate}>Desactivar</button>
@@ -690,7 +693,7 @@
     }
 
     function CloudIcon({ status }) {
-      const color=status==="on"?"#82B79A":status==="connecting"?"#FF9F0A":"#8E8E93";
+      const color=status==="on"?"#82B79A":status==="connecting"?"#FF9F0A":status==="error"?"#E0918A":"#8E8E93";
       return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a5 5 0 1 1 .71-9.95 6 6 0 0 1 11.34 2.5A4 4 0 0 1 20.5 19H18"/></svg>;
     }
 
@@ -836,8 +839,19 @@
       const [annualData,setAnnualData]=useState([]);
       const [syncCode,setSyncCode]=useState(()=>localStorage.getItem("sync-code-v1")||"");
       const [syncStatus,setSyncStatus]=useState("off"); // off | connecting | on | error
+      const [syncError,setSyncError]=useState("");
       const [showSync,setShowSync]=useState(false);
       const syncRef=useRef(null); // { db, room }
+      // Firestore niega silenciosamente los permisos si la base de datos no existe o
+      // las reglas no están publicadas: sin esto, el icono se quedaría en verde
+      // ("conectado" al SDK) aunque ningún dato llegue realmente a sincronizarse.
+      const handleSyncError=useCallback((e)=>{
+        console.warn("Sincronización:",e);
+        setSyncStatus("error");
+        setSyncError(e&&e.code==="permission-denied"
+          ? "Firestore ha rechazado el acceso. Revisa en la consola de Firebase que la base de datos Firestore esté creada y que las reglas estén publicadas."
+          : "Error de sincronización: "+((e&&e.message)||"desconocido"));
+      },[]);
       const amtRef=useRef();
       const storageKey=`entries-${year}-${month}`, catKey="custom-categories";
 
@@ -859,14 +873,20 @@
         const decoded=decodeSyncCode(syncCode);
         if(!decoded){ setSyncStatus("error"); return; }
         let cancelled=false;
-        setSyncStatus("connecting");
+        setSyncStatus("connecting"); setSyncError("");
         loadFirebase(decoded.config).then((db)=>{
           if(cancelled)return;
           syncRef.current={db,room:decoded.room};
-          setSyncStatus("on");
-        }).catch(()=>{ if(!cancelled) setSyncStatus("error"); });
+          // El SDK se inicializa localmente sin tocar la red: solo confirmamos que la
+          // sincronización funciona de verdad tras un test de lectura/escritura real.
+          const testRef=db.collection("sync_v1").doc(decoded.room).collection("meta").doc("ping");
+          testRef.set({at:Date.now()},{merge:true}).then(()=>{
+            if(cancelled)return;
+            setSyncStatus("on"); setSyncError("");
+          }).catch((e)=>{ if(!cancelled) handleSyncError(e); });
+        }).catch((e)=>{ if(!cancelled) handleSyncError(e); });
         return ()=>{cancelled=true;};
-      },[syncCode]);
+      },[syncCode,handleSyncError]);
 
       // Escucha en tiempo real los movimientos del mes actual en el código compartido.
       useEffect(()=>{
@@ -880,11 +900,11 @@
             localStorage.setItem(storageKey,JSON.stringify(list));
           }else{
             const local=JSON.parse(localStorage.getItem(storageKey)||"[]");
-            if(local.length) docRef.set({entries:local,updatedAt:Date.now()}).catch(()=>{});
+            if(local.length) docRef.set({entries:local,updatedAt:Date.now()}).catch(handleSyncError);
           }
-        },(e)=>console.warn("Sincronización (movimientos):",e));
+        },handleSyncError);
         return unsub;
-      },[syncStatus,storageKey,year,month]);
+      },[syncStatus,storageKey,year,month,handleSyncError]);
 
       // Escucha en tiempo real las categorías personalizadas del código compartido.
       useEffect(()=>{
@@ -898,11 +918,11 @@
             if(data.inc) setIncCats(data.inc);
             localStorage.setItem(catKey,JSON.stringify({exp:data.exp,inc:data.inc}));
           }else{
-            docRef.set({exp:expCats,inc:incCats,updatedAt:Date.now()}).catch(()=>{});
+            docRef.set({exp:expCats,inc:incCats,updatedAt:Date.now()}).catch(handleSyncError);
           }
-        },(e)=>console.warn("Sincronización (categorías):",e));
+        },handleSyncError);
         return unsub;
-      },[syncStatus]);
+      },[syncStatus,handleSyncError]);
 
       const activateSync=(code)=>{ localStorage.setItem("sync-code-v1",code.trim()); location.reload(); };
       const deactivateSync=()=>{ localStorage.removeItem("sync-code-v1"); location.reload(); };
@@ -911,14 +931,14 @@
         try{await window.storage.set(storageKey,JSON.stringify(list));}catch{}
         if(syncStatus==="on"&&syncRef.current){
           const {db,room}=syncRef.current;
-          db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`).set({entries:list,updatedAt:Date.now()}).catch((e)=>console.warn(e));
+          db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`).set({entries:list,updatedAt:Date.now()}).catch(handleSyncError);
         }
       };
       const persistCats=async(exp,inc)=>{
         try{await window.storage.set(catKey,JSON.stringify({exp,inc}));}catch{}
         if(syncStatus==="on"&&syncRef.current){
           const {db,room}=syncRef.current;
-          db.collection("sync_v1").doc(room).collection("meta").doc("categories").set({exp,inc,updatedAt:Date.now()}).catch((e)=>console.warn(e));
+          db.collection("sync_v1").doc(room).collection("meta").doc("categories").set({exp,inc,updatedAt:Date.now()}).catch(handleSyncError);
         }
       };
       const add=async()=>{
@@ -949,7 +969,7 @@
           {editing   &&<EditModal entry={editing} expCats={expCats} incCats={incCats} onSave={saveEdit} onDelete={del} onClose={()=>setEditing(null)} onCreateCat={saveCats}/>}
           {manageCat &&<CatManagerModal type={manageCat} expCats={expCats} incCats={incCats} onSave={saveCats} onClose={()=>setManageCat(null)}/>}
           {showExport&&<ExportModal month={month} year={year} entries={entries} annualData={annualData} expCats={expCats} incCats={incCats} statsYear={statsYear} onClose={()=>setShowExport(false)}/>}
-          {showSync  &&<SyncModal syncCode={syncCode} syncStatus={syncStatus} onActivate={activateSync} onDeactivate={deactivateSync} onClose={()=>setShowSync(false)}/>}
+          {showSync  &&<SyncModal syncCode={syncCode} syncStatus={syncStatus} syncError={syncError} onActivate={activateSync} onDeactivate={deactivateSync} onClose={()=>setShowSync(false)}/>}
 
           {/* Titlebar: visible en tablet y desktop */}
           {!isMobile && (
