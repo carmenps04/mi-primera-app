@@ -221,7 +221,12 @@
     }
     function decodeSyncCode(code) {
       try {
-        const obj = JSON.parse(decodeURIComponent(escape(atob(code.trim()))));
+        // Al copiar/pegar en móvil es fácil arrastrar saltos de línea, espacios u
+        // otros caracteres sueltos (p.ej. si el código venía en un bloque de chat
+        // que lo partió en varias líneas). Nos quedamos solo con el alfabeto base64
+        // válido para que el pegado sea tolerante a ese ruido.
+        const cleaned = code.replace(/[^A-Za-z0-9+/=]/g, "");
+        const obj = JSON.parse(decodeURIComponent(escape(atob(cleaned))));
         if (!obj || !obj.c || !obj.r) return null;
         return { config: obj.c, room: obj.r };
       } catch { return null; }
@@ -588,9 +593,10 @@
         setErr(""); setGenerated(encodeSyncCode(cfg,makeRoomId()));
       };
       const handleJoin=()=>{
-        const decoded=decodeSyncCode(joinText);
-        if(!decoded){ setErr("Ese código no es válido. Cópialo tal cual desde el otro dispositivo."); return; }
-        setErr(""); onActivate(joinText.trim());
+        const cleaned=joinText.replace(/[^A-Za-z0-9+/=]/g,"");
+        const decoded=decodeSyncCode(cleaned);
+        if(!decoded){ setErr("Ese código no es válido. Revisa que lo hayas pegado completo (es un texto largo, sin espacios)."); return; }
+        setErr(""); onActivate(cleaned);
       };
       const copyGenerated=async()=>{ try{ await navigator.clipboard.writeText(generated); setCopied(true); setTimeout(()=>setCopied(false),1500); }catch{} };
       const shareGenerated=async()=>{ if(navigator.share){ try{ await navigator.share({title:"Código de sincronización — Finanzas",text:generated}); }catch{} } else copyGenerated(); };
@@ -670,7 +676,7 @@
             {mode==="join"&&(
               <>
                 <div style={{fontSize:12,color:"#3a3a3c"}}>Pega aquí el código que generaste en el otro dispositivo.</div>
-                <textarea style={{...ms.inp,height:90,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} value={joinText} onChange={e=>setJoinText(e.target.value)}/>
+                <textarea style={{...ms.inp,height:90,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} autoCapitalize="off" autoCorrect="off" spellCheck={false} value={joinText} onChange={e=>setJoinText(e.target.value)}/>
                 {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
                 <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
                   <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Volver</button>
