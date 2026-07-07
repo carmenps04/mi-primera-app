@@ -27,19 +27,6 @@
   <script type="text/plain" id="app-source">
     const { useState, useEffect, useCallback, useRef } = React;
 
-    // Adaptador: sustituye la API de sandbox `window.storage` por localStorage,
-    // manteniendo la misma forma (Promise, { value }) para no tocar el resto del código.
-    window.storage = {
-      get: (key) => {
-        const v = localStorage.getItem(key);
-        return Promise.resolve(v !== null ? { value: v } : null);
-      },
-      set: (key, value) => {
-        localStorage.setItem(key, value);
-        return Promise.resolve();
-      },
-    };
-
     let jsPDFLoaded = false;
     function loadJsPDF() {
       if (jsPDFLoaded) return Promise.resolve();
@@ -67,10 +54,22 @@
       });
     }
 
+    // Config pública del proyecto Firebase (no es secreta: la seguridad real la dan
+    // las reglas de Firestore + la autenticación, no ocultar estos valores).
+    const FIREBASE_CONFIG = {
+      apiKey: "AIzaSyA8Pi3-i513s5dccZmo-LX1T1MCyaaKbc0",
+      authDomain: "finanzas-personales-c39f2.firebaseapp.com",
+      projectId: "finanzas-personales-c39f2",
+      storageBucket: "finanzas-personales-c39f2.firebasestorage.app",
+      messagingSenderId: "128868985804",
+      appId: "1:128868985804:web:014a9c88caefefb8278b69",
+    };
+
     let firebaseLoaded = null;
     // Carga el SDK de Firebase (compat, para poder usarlo con <script> sueltos sin bundler)
-    // e inicializa la app con la configuración incrustada en el propio código de sincronización.
-    function loadFirebase(config) {
+    // e inicializa app + Firestore + Auth. Se cachea en una promesa: llamadas
+    // posteriores devuelven la misma instancia ya lista, sin recargar scripts.
+    function loadFirebase() {
       if (firebaseLoaded) return firebaseLoaded;
       firebaseLoaded = new Promise((res, rej) => {
         const s1 = document.createElement("script");
@@ -79,18 +78,54 @@
           const s2 = document.createElement("script");
           s2.src = "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js";
           s2.onload = () => {
-            try {
-              firebase.initializeApp(config);
-              const db = firebase.firestore();
-              db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
-              res(db);
-            } catch (e) { rej(e); }
+            const s3 = document.createElement("script");
+            s3.src = "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js";
+            s3.onload = () => {
+              try {
+                firebase.initializeApp(FIREBASE_CONFIG);
+                const db = firebase.firestore();
+                db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+                res({ db, auth: firebase.auth() });
+              } catch (e) { rej(e); }
+            };
+            s3.onerror = rej; document.head.appendChild(s3);
           };
           s2.onerror = rej; document.head.appendChild(s2);
         };
         s1.onerror = rej; document.head.appendChild(s1);
       });
       return firebaseLoaded;
+    }
+
+    // Migra a Firestore cualquier dato guardado en localStorage antes de activar
+    // las cuentas (entradas de meses sueltos en este navegador desde que la app
+    // solo usaba almacenamiento local). Se ejecuta una vez por cuenta y dispositivo.
+    async function migrateLocalDataIfNeeded(db, uid) {
+      const flagKey = `migrated-${uid}`;
+      if (localStorage.getItem(flagKey)) return;
+      try {
+        const col = db.collection("usuarios").doc(uid).collection("transacciones");
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          const m = key && key.match(/^entries-(\d{4})-(\d+)$/);
+          if (!m) continue;
+          const list = JSON.parse(localStorage.getItem(key) || "[]");
+          if (!list.length) continue;
+          const docRef = col.doc(`${m[1]}-${m[2]}`);
+          const snap = await docRef.get();
+          if (!snap.exists) await docRef.set({ entries: list, updatedAt: Date.now() });
+        }
+        const catsRaw = localStorage.getItem("custom-categories");
+        if (catsRaw) {
+          const { exp, inc } = JSON.parse(catsRaw);
+          if (exp || inc) {
+            const catRef = db.collection("usuarios").doc(uid).collection("meta").doc("categorias");
+            const snap = await catRef.get();
+            if (!snap.exists) await catRef.set({ exp: exp || DEFAULT_EXPENSE_CATS, inc: inc || DEFAULT_INCOME_CATS, updatedAt: Date.now() });
+          }
+        }
+      } catch (e) { console.warn("Migración local → Firestore:", e); }
+      localStorage.setItem(flagKey, "1");
     }
 
     // ─── Descarga/compartir de archivos exportados ─────────────────────────────────
@@ -206,42 +241,6 @@
       return { dataUrl: canvas.toDataURL("image/png"), width: W, height: H };
     }
 
-    // ─── Sincronización entre dispositivos (código de sincronización) ─────────────
-    // El código incluye la configuración de Firebase (pública por diseño, como
-    // cualquier config de app cliente) más un identificador de "sala" aleatorio, todo
-    // codificado en base64. Así basta con copiar un único código a los demás
-    // dispositivos: no hay que tocar el código fuente ni crear cuentas en cada uno.
-    function makeRoomId() {
-      const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-      let s = ""; for (let i = 0; i < 12; i++) s += chars[Math.floor(Math.random() * chars.length)];
-      return s;
-    }
-    function encodeSyncCode(firebaseConfig, room) {
-      return btoa(unescape(encodeURIComponent(JSON.stringify({ c: firebaseConfig, r: room }))));
-    }
-    function decodeSyncCode(code) {
-      try {
-        // Al copiar/pegar en móvil es fácil arrastrar saltos de línea, espacios u
-        // otros caracteres sueltos (p.ej. si el código venía en un bloque de chat
-        // que lo partió en varias líneas). Nos quedamos solo con el alfabeto base64
-        // válido para que el pegado sea tolerante a ese ruido.
-        const cleaned = code.replace(/[^A-Za-z0-9+/=]/g, "");
-        const obj = JSON.parse(decodeURIComponent(escape(atob(cleaned))));
-        if (!obj || !obj.c || !obj.r) return null;
-        return { config: obj.c, room: obj.r };
-      } catch { return null; }
-    }
-    // Extrae los campos de la config de Firebase tanto si se pega el objeto JS
-    // literal (tal cual lo muestra la consola de Firebase) como si se pega JSON.
-    function parseFirebaseConfigSnippet(text) {
-      const cfg = {};
-      ["apiKey", "authDomain", "projectId", "storageBucket", "messagingSenderId", "appId"].forEach((k) => {
-        const m = text.match(new RegExp(k + "\\s*:\\s*[\"']([^\"']+)[\"']"));
-        if (m) cfg[k] = m[1];
-      });
-      return cfg;
-    }
-
     const DEFAULT_EXPENSE_CATS = [
       { id:"food",          label:"Alimentación", color:"#FF6B6B", bg:"#FFF0F0", icon:"🍽️", custom:false },
       { id:"transport",     label:"Transporte",   color:"#007AFF", bg:"#F0F6FF", icon:"🚌", custom:false },
@@ -282,7 +281,7 @@
       return w;
     }
 
-    function uid()  { return "c_" + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+    function genId() { return "c_" + Math.random().toString(36).slice(2) + Date.now().toString(36); }
     function fmt(n) { return new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(n); }
     function fmtShort(n) {
       if (Math.abs(n)>=1000) return (n/1000).toFixed(1).replace(".",",")+" k €";
@@ -486,7 +485,7 @@
     function CatManagerModal({ type, expCats, incCats, onSave, onClose }) {
       const [list,setList]=useState(type==="expense"?expCats:incCats);
       const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState(PALETTE[0]); const [err,setErr]=useState("");
-      const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:uid(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor(PALETTE[0]); };
+      const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:genId(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor(PALETTE[0]); };
       return (
         <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
           <div style={{...ms.modal,width:"min(420px,95vw)"}}>
@@ -577,113 +576,78 @@
       );
     }
 
-    // ─── SyncModal ────────────────────────────────────────────────────────────────
-    function SyncModal({ syncCode, syncStatus, syncError, onActivate, onDeactivate, onClose }) {
-      const [mode,setMode]=useState(syncCode?"status":"choose");
-      const [cfgText,setCfgText]=useState("");
-      const [joinText,setJoinText]=useState("");
-      const [generated,setGenerated]=useState("");
-      const [err,setErr]=useState("");
-      const [copied,setCopied]=useState(false);
-      const rulesSnippet="rules_version = '2';\nservice cloud.firestore {\n  match /databases/{database}/documents {\n    match /{document=**} {\n      allow read, write: if true;\n    }\n  }\n}";
+    // ─── AuthScreen: registro/inicio de sesión con email y contraseña ─────────────
+    function AuthScreen() {
+      const [mode,setMode]=useState("login"); // login | signup | reset
+      const [email,setEmail]=useState(""); const [password,setPassword]=useState("");
+      const [err,setErr]=useState(""); const [busy,setBusy]=useState(false); const [resetSent,setResetSent]=useState(false);
 
-      const handleCreate=()=>{
-        const cfg=parseFirebaseConfigSnippet(cfgText);
-        if(!cfg.apiKey||!cfg.projectId){ setErr("No se han encontrado los datos necesarios. Pega el bloque de configuración completo tal como lo muestra Firebase."); return; }
-        setErr(""); setGenerated(encodeSyncCode(cfg,makeRoomId()));
+      const friendlyError=(e)=>{
+        const map={
+          "auth/invalid-email":"El correo no es válido.",
+          "auth/user-not-found":"No existe ninguna cuenta con ese correo.",
+          "auth/wrong-password":"Contraseña incorrecta.",
+          "auth/email-already-in-use":"Ya existe una cuenta con ese correo. Inicia sesión.",
+          "auth/weak-password":"La contraseña debe tener al menos 6 caracteres.",
+          "auth/invalid-credential":"Correo o contraseña incorrectos.",
+          "auth/too-many-requests":"Demasiados intentos. Espera un momento e inténtalo de nuevo.",
+          "auth/operation-not-allowed":"El inicio de sesión con email/contraseña no está activado en Firebase (Authentication → Sign-in method).",
+        };
+        return (e&&map[e.code])||("Error: "+((e&&e.message)||"desconocido"));
       };
-      const handleJoin=()=>{
-        const cleaned=joinText.replace(/[^A-Za-z0-9+/=]/g,"");
-        const decoded=decodeSyncCode(cleaned);
-        if(!decoded){ setErr("Ese código no es válido. Revisa que lo hayas pegado completo (es un texto largo, sin espacios)."); return; }
-        setErr(""); onActivate(cleaned);
+
+      const submit=async()=>{
+        if(!email.trim()||!password){ setErr("Rellena correo y contraseña."); return; }
+        setErr(""); setBusy(true);
+        try{
+          const {auth}=await loadFirebase();
+          if(mode==="signup") await auth.createUserWithEmailAndPassword(email.trim(),password);
+          else await auth.signInWithEmailAndPassword(email.trim(),password);
+        }catch(e){ setErr(friendlyError(e)); }
+        setBusy(false);
       };
-      const copyGenerated=async()=>{ try{ await navigator.clipboard.writeText(generated); setCopied(true); setTimeout(()=>setCopied(false),1500); }catch{} };
-      const shareGenerated=async()=>{ if(navigator.share){ try{ await navigator.share({title:"Código de sincronización — Finanzas",text:generated}); }catch{} } else copyGenerated(); };
+      const submitReset=async()=>{
+        if(!email.trim()){ setErr("Escribe tu correo primero."); return; }
+        setErr(""); setBusy(true);
+        try{ const {auth}=await loadFirebase(); await auth.sendPasswordResetEmail(email.trim()); setResetSent(true); }
+        catch(e){ setErr(friendlyError(e)); }
+        setBusy(false);
+      };
 
       return (
-        <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
-          <div style={{...ms.modal,width:"min(440px,95vw)"}}>
-            <div style={ms.header}><span style={ms.title}>Sincronizar entre dispositivos</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
-
-            {mode==="status"&&(
+        <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F2F2F7",padding:20,fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif"}}>
+          <style>{CSS}</style>
+          <div style={{background:"white",borderRadius:16,padding:"28px 24px",width:"min(360px,100%)",boxShadow:"0 24px 60px rgba(0,0,0,0.12)",display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:28,marginBottom:6}}>💶</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#1d1d1f"}}>Finanzas Personales</div>
+              <div style={{fontSize:12,color:"#8E8E93",marginTop:4}}>{mode==="signup"?"Crea tu cuenta para empezar":mode==="reset"?"Recupera tu contraseña":"Inicia sesión para ver tus datos"}</div>
+            </div>
+            {mode==="reset"?(
+              resetSent?(
+                <div style={{fontSize:13,color:"#1d1d1f",textAlign:"center",lineHeight:1.5}}>
+                  Te hemos enviado un correo a <b>{email}</b> con un enlace para restablecer la contraseña.
+                  <button style={{...ms.cancelBtn,marginTop:14,width:"100%"}} onClick={()=>{setMode("login");setResetSent(false);}}>Volver a iniciar sesión</button>
+                </div>
+              ):(
+                <>
+                  <input style={ms.inp} type="email" placeholder="Correo electrónico" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="off" autoCorrect="off"/>
+                  {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
+                  <button style={{...ms.saveBtn,width:"100%",padding:"10px 0"}} onClick={submitReset} disabled={busy}>{busy?"Enviando...":"Enviar enlace de recuperación"}</button>
+                  <button style={{...ms.cancelBtn,width:"100%"}} onClick={()=>{setMode("login");setErr("");}}>Volver</button>
+                </>
+              )
+            ):(
               <>
-                <div style={{background:syncStatus==="error"?"#FFF0F0":"#F0FFF4",border:`1px solid ${syncStatus==="error"?"rgba(224,145,138,0.35)":"rgba(130,183,154,0.3)"}`,borderRadius:10,padding:12,display:"flex",alignItems:"center",gap:10}}>
-                  <span style={{fontSize:20}}>{syncStatus==="on"?"🟢":syncStatus==="connecting"?"🟡":"🔴"}</span>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f"}}>{syncStatus==="on"?"Sincronización activa":syncStatus==="connecting"?"Conectando...":"Sin conexión al servicio"}</div>
-                    <div style={{fontSize:11,color:"#8E8E93"}}>Los cambios se comparten con cualquier dispositivo que use el mismo código.</div>
-                  </div>
-                </div>
-                {syncStatus==="error"&&syncError&&(
-                  <div style={{fontSize:12,color:"#B5493F",background:"#FFF0F0",border:"1px solid rgba(224,145,138,0.35)",borderRadius:8,padding:10,lineHeight:1.5}}>{syncError}</div>
-                )}
-                <div style={{fontSize:11,color:"#8E8E93"}}>Trata tu código de sincronización como una contraseña: quien lo tenga puede ver y modificar tus datos.</div>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-                  <button style={ms.deleteBtn} onClick={onDeactivate}>Desactivar</button>
-                  <div style={{display:"flex",gap:8}}>
-                    <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Cambiar código</button>
-                    <button style={ms.saveBtn} onClick={onClose}>Cerrar</button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {mode==="choose"&&(
-              <>
-                <div style={{fontSize:13,color:"#3a3a3c",lineHeight:1.5}}>Para ver los mismos gastos e ingresos en tu PC, iPhone y iPad, todos los dispositivos deben usar el mismo <b>código de sincronización</b>.</div>
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <button style={{...ms.saveBtn,padding:"12px 0"}} onClick={()=>setMode("create")}>Crear sincronización nueva (primer dispositivo)</button>
-                  <button style={{...ms.cancelBtn,padding:"12px 0"}} onClick={()=>setMode("join")}>Ya tengo un código de otro dispositivo</button>
-                </div>
-                {syncCode&&<button style={ms.cancelBtn} onClick={()=>setMode("status")}>Volver</button>}
-              </>
-            )}
-
-            {mode==="create"&&(
-              <>
-                <div style={{fontSize:12,color:"#3a3a3c",lineHeight:1.6}}>
-                  Sólo hace falta hacerlo <b>una vez</b>, en un único dispositivo:
-                  <ol style={{margin:"6px 0 0 18px",padding:0}}>
-                    <li>Entra en <b>console.firebase.google.com</b> y crea un proyecto gratuito.</li>
-                    <li>Ve a <b>Compilación → Firestore Database</b> y pulsa "Crear base de datos" (modo producción, cualquier región).</li>
-                    <li>En la pestaña <b>Reglas</b>, sustituye el contenido por el texto de abajo y publica.</li>
-                    <li>Ve a <b>Configuración del proyecto → General</b>, añade una app web ({"</>"}) y copia el bloque de configuración.</li>
-                    <li>Pégalo aquí abajo.</li>
-                  </ol>
-                </div>
-                <pre style={{background:"#1d1d1f",color:"#82B79A",fontSize:10,padding:8,borderRadius:6,overflowX:"auto",margin:0,whiteSpace:"pre"}}>{rulesSnippet}</pre>
-                <textarea style={{...ms.inp,height:100,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} placeholder={'const firebaseConfig = {\n  apiKey: "...",\n  authDomain: "...",\n  ...\n};'} value={cfgText} onChange={e=>setCfgText(e.target.value)}/>
+                <input style={ms.inp} type="email" placeholder="Correo electrónico" value={email} onChange={e=>setEmail(e.target.value)} autoCapitalize="off" autoCorrect="off" onKeyDown={e=>e.key==="Enter"&&submit()}/>
+                <input style={ms.inp} type="password" placeholder="Contraseña" value={password} onChange={e=>setPassword(e.target.value)} onKeyDown={e=>e.key==="Enter"&&submit()}/>
                 {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
-                {!generated?(
-                  <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-                    <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Volver</button>
-                    <button style={ms.saveBtn} onClick={handleCreate}>Generar código</button>
-                  </div>
-                ):(
-                  <>
-                    <div style={{background:"#F9F9FB",border:"1px solid rgba(0,0,0,0.08)",borderRadius:10,padding:10}}>
-                      <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Copia este código en tus demás dispositivos:</div>
-                      <div style={{fontFamily:"monospace",fontSize:11,wordBreak:"break-all",color:"#1d1d1f",background:"white",border:"1px solid rgba(0,0,0,0.08)",borderRadius:6,padding:8}}>{generated}</div>
-                      <div style={{display:"flex",gap:8,marginTop:8}}>
-                        <button style={ms.cancelBtn} onClick={copyGenerated}>{copied?"¡Copiado!":"Copiar"}</button>
-                        <button style={ms.cancelBtn} onClick={shareGenerated}>Compartir</button>
-                      </div>
-                    </div>
-                    <button style={ms.saveBtn} onClick={()=>onActivate(generated)}>Activar en este dispositivo</button>
-                  </>
-                )}
-              </>
-            )}
-
-            {mode==="join"&&(
-              <>
-                <div style={{fontSize:12,color:"#3a3a3c"}}>Pega aquí el código que generaste en el otro dispositivo.</div>
-                <textarea style={{...ms.inp,height:90,fontFamily:"monospace",fontSize:11,resize:"vertical",padding:8}} autoCapitalize="off" autoCorrect="off" spellCheck={false} value={joinText} onChange={e=>setJoinText(e.target.value)}/>
-                {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
-                <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-                  <button style={ms.cancelBtn} onClick={()=>setMode("choose")}>Volver</button>
-                  <button style={ms.saveBtn} onClick={handleJoin}>Unir este dispositivo</button>
+                <button style={{...ms.saveBtn,width:"100%",padding:"10px 0"}} onClick={submit} disabled={busy}>{busy?"Un momento...":mode==="signup"?"Crear cuenta":"Iniciar sesión"}</button>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                  <button style={{background:"none",border:"none",color:"#007AFF",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{setMode(mode==="signup"?"login":"signup");setErr("");}}>
+                    {mode==="signup"?"Ya tengo cuenta":"Crear cuenta nueva"}
+                  </button>
+                  {mode==="login"&&<button style={{background:"none",border:"none",color:"#8E8E93",cursor:"pointer",fontFamily:"inherit",padding:0}} onClick={()=>{setMode("reset");setErr("");}}>¿Olvidaste tu contraseña?</button>}
                 </div>
               </>
             )}
@@ -692,9 +656,26 @@
       );
     }
 
-    function CloudIcon({ status }) {
-      const color=status==="on"?"#82B79A":status==="connecting"?"#FF9F0A":status==="error"?"#E0918A":"#8E8E93";
-      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a5 5 0 1 1 .71-9.95 6 6 0 0 1 11.34 2.5A4 4 0 0 1 20.5 19H18"/></svg>;
+    // ─── AccountModal ─────────────────────────────────────────────────────────────
+    function AccountModal({ user, onClose }) {
+      const handleSignOut=async()=>{ const {auth}=await loadFirebase(); await auth.signOut(); };
+      return (
+        <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div style={{...ms.modal,width:"min(340px,95vw)"}}>
+            <div style={ms.header}><span style={ms.title}>Tu cuenta</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
+            <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f"}}>{user.email}</div>
+            <div style={{fontSize:11,color:"#8E8E93"}}>Tus datos son privados: solo tú puedes verlos, en cualquier dispositivo donde inicies sesión con esta cuenta.</div>
+            <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+              <button style={ms.cancelBtn} onClick={onClose}>Cerrar</button>
+              <button style={ms.deleteBtn} onClick={handleSignOut}>Cerrar sesión</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function AccountIcon() {
+      return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"/></svg>;
     }
 
     const ms={
@@ -818,7 +799,8 @@
     });
 
     // ─── App ──────────────────────────────────────────────────────────────────────
-    function App() {
+    function App({ user }) {
+      const uid=user.uid;
       const now=new Date(), YEARS=getYears();
       const cw=useContainerWidth();
       const isMobile=cw<=640, isTablet=cw>640&&cw<=1024, isDesktop=cw>1024;
@@ -837,114 +819,95 @@
       const [statsYear,setStatsYear]=useState(now.getFullYear());
       const [statsMode,setStatsMode]=useState("mensual");
       const [annualData,setAnnualData]=useState([]);
-      const [syncCode,setSyncCode]=useState(()=>localStorage.getItem("sync-code-v1")||"");
-      const [syncStatus,setSyncStatus]=useState("off"); // off | connecting | on | error
-      const [syncError,setSyncError]=useState("");
-      const [showSync,setShowSync]=useState(false);
-      const syncRef=useRef(null); // { db, room }
-      // Firestore niega silenciosamente los permisos si la base de datos no existe o
-      // las reglas no están publicadas: sin esto, el icono se quedaría en verde
-      // ("conectado" al SDK) aunque ningún dato llegue realmente a sincronizarse.
-      const handleSyncError=useCallback((e)=>{
-        console.warn("Sincronización:",e);
-        setSyncStatus("error");
-        setSyncError(e&&e.code==="permission-denied"
-          ? "Firestore ha rechazado el acceso. Revisa en la consola de Firebase que la base de datos Firestore esté creada y que las reglas estén publicadas."
-          : "Error de sincronización: "+((e&&e.message)||"desconocido"));
+      const [showAccount,setShowAccount]=useState(false);
+      const [dataError,setDataError]=useState("");
+      // Firestore niega silenciosamente los permisos si las reglas no cubren esta
+      // ruta: sin esto, un fallo de configuración se vería como "no pasa nada".
+      const handleDataError=useCallback((e)=>{
+        console.warn("Firestore:",e);
+        setDataError(e&&e.code==="permission-denied"
+          ? "Firestore ha rechazado el acceso a tus datos. Revisa que las reglas de seguridad de /usuarios/{uid} estén publicadas."
+          : "Error al sincronizar: "+((e&&e.message)||"desconocido"));
       },[]);
       const amtRef=useRef();
-      const storageKey=`entries-${year}-${month}`, catKey="custom-categories";
 
-      const load=useCallback(async()=>{ setLoading(true); try{const r=await window.storage.get(storageKey);setEntries(r?JSON.parse(r.value):[]);}catch{setEntries([]);} setLoading(false); },[storageKey]);
-      useEffect(()=>{load();},[load]);
-      useEffect(()=>{ (async()=>{ try{const r=await window.storage.get(catKey);if(r){const{exp,inc}=JSON.parse(r.value);if(exp)setExpCats(exp);if(inc)setIncCats(inc);}}catch{} })(); },[]);
-      useEffect(()=>{setCat(type==="expense"?expCats[0].id:incCats[0].id);},[type]);
+      // Migra datos antiguos guardados solo en este navegador (de antes de tener
+      // cuenta) a la cuenta recién iniciada, una única vez.
       useEffect(()=>{
-        (async()=>{
-          const rows=[];
-          for(let m=0;m<12;m++){ try{const r=await window.storage.get(`entries-${statsYear}-${m}`);const list=r?JSON.parse(r.value):[];const inc=list.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0),exp=list.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);rows.push({label:MONTHS_SHORT[m],income:inc,expense:exp,balance:inc-exp});}catch{rows.push({label:MONTHS_SHORT[m],income:0,expense:0,balance:0});} }
-          setAnnualData(rows);
-        })();
-      },[statsYear,entries,storageKey]);
-
-      // Conexión con Firebase a partir del código de sincronización guardado localmente.
-      useEffect(()=>{
-        if(!syncCode){ setSyncStatus("off"); return; }
-        const decoded=decodeSyncCode(syncCode);
-        if(!decoded){ setSyncStatus("error"); return; }
         let cancelled=false;
-        setSyncStatus("connecting"); setSyncError("");
-        loadFirebase(decoded.config).then((db)=>{
-          if(cancelled)return;
-          syncRef.current={db,room:decoded.room};
-          // El SDK se inicializa localmente sin tocar la red: solo confirmamos que la
-          // sincronización funciona de verdad tras un test de lectura/escritura real.
-          const testRef=db.collection("sync_v1").doc(decoded.room).collection("meta").doc("ping");
-          testRef.set({at:Date.now()},{merge:true}).then(()=>{
-            if(cancelled)return;
-            setSyncStatus("on"); setSyncError("");
-          }).catch((e)=>{ if(!cancelled) handleSyncError(e); });
-        }).catch((e)=>{ if(!cancelled) handleSyncError(e); });
+        loadFirebase().then(({db})=>{ if(!cancelled) migrateLocalDataIfNeeded(db,uid).catch(()=>{}); }).catch(handleDataError);
         return ()=>{cancelled=true;};
-      },[syncCode,handleSyncError]);
+      },[uid,handleDataError]);
 
-      // Escucha en tiempo real los movimientos del mes actual en el código compartido.
+      // Movimientos del mes actual, en tiempo real, desde /usuarios/{uid}/transacciones.
       useEffect(()=>{
-        if(syncStatus!=="on"||!syncRef.current) return;
-        const {db,room}=syncRef.current;
-        const docRef=db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`);
-        const unsub=docRef.onSnapshot((snap)=>{
-          if(snap.exists){
-            const list=snap.data().entries||[];
-            setEntries(list);
-            localStorage.setItem(storageKey,JSON.stringify(list));
-          }else{
-            const local=JSON.parse(localStorage.getItem(storageKey)||"[]");
-            if(local.length) docRef.set({entries:local,updatedAt:Date.now()}).catch(handleSyncError);
-          }
-        },handleSyncError);
-        return unsub;
-      },[syncStatus,storageKey,year,month,handleSyncError]);
+        setLoading(true);
+        let unsub=()=>{}, cancelled=false;
+        loadFirebase().then(({db})=>{
+          if(cancelled)return;
+          const docRef=db.collection("usuarios").doc(uid).collection("transacciones").doc(`${year}-${month}`);
+          unsub=docRef.onSnapshot((snap)=>{
+            setEntries(snap.exists?(snap.data().entries||[]):[]);
+            setDataError(""); setLoading(false);
+          },(e)=>{ handleDataError(e); setLoading(false); });
+        }).catch((e)=>{ handleDataError(e); setLoading(false); });
+        return ()=>{cancelled=true; unsub();};
+      },[uid,year,month,handleDataError]);
 
-      // Escucha en tiempo real las categorías personalizadas del código compartido.
+      // Categorías personalizadas, en tiempo real, desde /usuarios/{uid}/meta/categorias.
       useEffect(()=>{
-        if(syncStatus!=="on"||!syncRef.current) return;
-        const {db,room}=syncRef.current;
-        const docRef=db.collection("sync_v1").doc(room).collection("meta").doc("categories");
-        const unsub=docRef.onSnapshot((snap)=>{
-          if(snap.exists){
-            const data=snap.data();
-            if(data.exp) setExpCats(data.exp);
-            if(data.inc) setIncCats(data.inc);
-            localStorage.setItem(catKey,JSON.stringify({exp:data.exp,inc:data.inc}));
-          }else{
-            docRef.set({exp:expCats,inc:incCats,updatedAt:Date.now()}).catch(handleSyncError);
-          }
-        },handleSyncError);
-        return unsub;
-      },[syncStatus,handleSyncError]);
+        let unsub=()=>{}, cancelled=false;
+        loadFirebase().then(({db})=>{
+          if(cancelled)return;
+          const docRef=db.collection("usuarios").doc(uid).collection("meta").doc("categorias");
+          unsub=docRef.onSnapshot((snap)=>{
+            if(snap.exists){
+              const data=snap.data();
+              if(data.exp) setExpCats(data.exp);
+              if(data.inc) setIncCats(data.inc);
+            }else{
+              docRef.set({exp:DEFAULT_EXPENSE_CATS,inc:DEFAULT_INCOME_CATS,updatedAt:Date.now()}).catch(handleDataError);
+            }
+          },handleDataError);
+        }).catch(handleDataError);
+        return ()=>{cancelled=true; unsub();};
+      },[uid,handleDataError]);
 
-      const activateSync=(code)=>{ localStorage.setItem("sync-code-v1",code.trim()); location.reload(); };
-      const deactivateSync=()=>{ localStorage.removeItem("sync-code-v1"); location.reload(); };
+      useEffect(()=>{setCat(type==="expense"?expCats[0].id:incCats[0].id);},[type]);
+
+      // Estadísticas anuales: una lectura puntual por mes (no un listener permanente).
+      useEffect(()=>{
+        let cancelled=false;
+        loadFirebase().then(({db})=>{
+          const col=db.collection("usuarios").doc(uid).collection("transacciones");
+          return Promise.all(Array.from({length:12},(_,m)=>
+            col.doc(`${statsYear}-${m}`).get().then((snap)=>{
+              const list=snap.exists?(snap.data().entries||[]):[];
+              const inc=list.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0);
+              const exp=list.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
+              return {label:MONTHS_SHORT[m],income:inc,expense:exp,balance:inc-exp};
+            }).catch(()=>({label:MONTHS_SHORT[m],income:0,expense:0,balance:0}))
+          ));
+        }).then((rows)=>{ if(!cancelled) setAnnualData(rows); }).catch(()=>{});
+        return ()=>{cancelled=true;};
+      },[statsYear,entries,uid]);
 
       const persist=async(list)=>{
-        try{await window.storage.set(storageKey,JSON.stringify(list));}catch{}
-        if(syncStatus==="on"&&syncRef.current){
-          const {db,room}=syncRef.current;
-          db.collection("sync_v1").doc(room).collection("months").doc(`${year}-${month}`).set({entries:list,updatedAt:Date.now()}).catch(handleSyncError);
-        }
+        try{
+          const {db}=await loadFirebase();
+          await db.collection("usuarios").doc(uid).collection("transacciones").doc(`${year}-${month}`).set({entries:list,updatedAt:Date.now()});
+        }catch(e){ handleDataError(e); }
       };
       const persistCats=async(exp,inc)=>{
-        try{await window.storage.set(catKey,JSON.stringify({exp,inc}));}catch{}
-        if(syncStatus==="on"&&syncRef.current){
-          const {db,room}=syncRef.current;
-          db.collection("sync_v1").doc(room).collection("meta").doc("categories").set({exp,inc,updatedAt:Date.now()}).catch(handleSyncError);
-        }
+        try{
+          const {db}=await loadFirebase();
+          await db.collection("usuarios").doc(uid).collection("meta").doc("categorias").set({exp,inc,updatedAt:Date.now()});
+        }catch(e){ handleDataError(e); }
       };
       const add=async()=>{
         if(!desc.trim()){setErr("Escribe una descripción.");return;}
         const a=parseFloat(amt.replace(",",".")); if(isNaN(a)||a<=0){setErr("Introduce un importe válido.");return;}
-        setErr(""); const item={id:uid(),description:desc.trim(),amount:a,category:cat,type,date:new Date().toISOString()};
+        setErr(""); const item={id:genId(),description:desc.trim(),amount:a,category:cat,type,date:new Date().toISOString()};
         const updated=[item,...entries]; setEntries(updated);setAdded(item.id);setTimeout(()=>setAdded(null),600);
         await persist(updated);setDesc("");setAmt("");
       };
@@ -969,7 +932,10 @@
           {editing   &&<EditModal entry={editing} expCats={expCats} incCats={incCats} onSave={saveEdit} onDelete={del} onClose={()=>setEditing(null)} onCreateCat={saveCats}/>}
           {manageCat &&<CatManagerModal type={manageCat} expCats={expCats} incCats={incCats} onSave={saveCats} onClose={()=>setManageCat(null)}/>}
           {showExport&&<ExportModal month={month} year={year} entries={entries} annualData={annualData} expCats={expCats} incCats={incCats} statsYear={statsYear} onClose={()=>setShowExport(false)}/>}
-          {showSync  &&<SyncModal syncCode={syncCode} syncStatus={syncStatus} syncError={syncError} onActivate={activateSync} onDeactivate={deactivateSync} onClose={()=>setShowSync(false)}/>}
+          {showAccount&&<AccountModal user={user} onClose={()=>setShowAccount(false)}/>}
+          {dataError&&(
+            <div style={{background:"#FFF0F0",borderBottom:"1px solid rgba(224,145,138,0.35)",color:"#B5493F",fontSize:12,padding:"8px 16px",textAlign:"center",flexShrink:0}}>{dataError}</div>
+          )}
 
           {/* Titlebar: visible en tablet y desktop */}
           {!isMobile && (
@@ -983,8 +949,8 @@
                 : <div style={{width:54}}/>}
               <span style={{fontSize:13,fontWeight:500,color:"#3a3a3c",letterSpacing:0.1}}>Finanzas Personales — {MONTHS[month]} {year}</span>
               <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <button className="share-btn" title="Sincronizar entre dispositivos" onClick={()=>setShowSync(true)}>
-                  <CloudIcon status={syncStatus}/>
+                <button className="share-btn" title={user.email} onClick={()=>setShowAccount(true)}>
+                  <AccountIcon/>
                 </button>
                 <button className="share-btn" onClick={()=>setShowExport(true)} style={{width:"auto",padding:"0 10px",gap:6}}>
                   <ShareIcon/><span style={{fontSize:13,fontWeight:600}}>Exportar</span>
@@ -1005,8 +971,8 @@
             </div>
             {isMobile && (
               <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>setShowSync(true)} title="Sincronizar entre dispositivos" style={{display:"flex",alignItems:"center",justifyContent:"center",width:44,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",flexShrink:0}}>
-                  <CloudIcon status={syncStatus}/>
+                <button onClick={()=>setShowAccount(true)} title={user.email} style={{display:"flex",alignItems:"center",justifyContent:"center",width:44,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",flexShrink:0}}>
+                  <AccountIcon/>
                 </button>
                 <button onClick={()=>setShowExport(true)} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.12)",background:"white",color:"#3a3a3c",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                   <ShareIcon/> Exportar informe
@@ -1252,8 +1218,27 @@
       select option { background: white; color: #1d1d1f; }
     `;
 
+    // ─── Root: decide entre pantalla de acceso y la app según haya sesión ─────────
+    function Root() {
+      const [user,setUser]=useState(undefined); // undefined=comprobando, null=sin sesión, objeto=con sesión
+      const [fatalError,setFatalError]=useState("");
+      useEffect(()=>{
+        let unsub=()=>{};
+        loadFirebase().then(({auth})=>{ unsub=auth.onAuthStateChanged((u)=>setUser(u||null)); })
+          .catch((e)=>{ console.error(e); setFatalError("No se pudo conectar con Firebase. Comprueba tu conexión y recarga la página."); setUser(null); });
+        return ()=>unsub();
+      },[]);
+      if(fatalError){
+        return <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F2F2F7",color:"#B5493F",fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif",fontSize:13,textAlign:"center",padding:24}}>{fatalError}</div>;
+      }
+      if(user===undefined){
+        return <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F2F2F7",color:"#8E8E93",fontFamily:"'Inter',-apple-system,BlinkMacSystemFont,sans-serif",fontSize:14}}>Cargando…</div>;
+      }
+      return user?<App user={user}/>:<AuthScreen/>;
+    }
+
     const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    root.render(<Root />);
   </script>
 
   <script>
