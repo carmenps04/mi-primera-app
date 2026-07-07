@@ -127,39 +127,82 @@
       return "downloaded";
     }
 
-    // ─── Gráfico Ingresos/Gastos rasterizado (para incrustar en PDF y Excel) ───────
-    function buildIncomeExpenseChartPNG(totalIncome, totalExpense) {
-      const scale = 2, W = 320, H = 190;
+    // ─── Gráficos circulares rasterizados (para incrustar en PDF y Excel) ──────────
+    // Se dibujan en un <canvas> y se exportan como PNG porque ni jsPDF ni ExcelJS
+    // (en su build de navegador) soportan gráficos vectoriales nativos: la imagen
+    // es la única forma fiable de llevar el mismo donut que se ve en la app a un
+    // PDF/Excel. Siempre se genera (no depende de qué secciones estén marcadas) y
+    // se coloca como lo primero del informe para que sea imposible no verlo.
+    function buildFullChartsPNG(totalIncome, totalExpense, expByCat, incByCat) {
+      const scale = 1.5, W = 640, H = 470;
       const canvas = document.createElement("canvas");
       canvas.width = W * scale; canvas.height = H * scale;
       const ctx = canvas.getContext("2d");
       ctx.scale(scale, scale);
       ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
-      const total = totalIncome + totalExpense;
-      const cx = H / 2, cy = H / 2, r = H / 2 - 18, lw = r * 0.36;
-      ctx.lineWidth = lw; ctx.lineCap = "butt";
-      if (total <= 0) {
-        ctx.strokeStyle = "#E5E5EA";
-        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-      } else {
-        const start = -Math.PI / 2, incAngle = (totalIncome / total) * Math.PI * 2;
-        ctx.strokeStyle = "#82B79A";
-        ctx.beginPath(); ctx.arc(cx, cy, r, start, start + incAngle); ctx.stroke();
-        ctx.strokeStyle = "#E0918A";
-        ctx.beginPath(); ctx.arc(cx, cy, r, start + incAngle, start + Math.PI * 2); ctx.stroke();
+
+      function donutArc(cx, cy, r, lw, slices) {
+        const total = slices.reduce((s, x) => s + x.value, 0);
+        ctx.lineWidth = lw; ctx.lineCap = "butt";
+        if (total <= 0) {
+          ctx.strokeStyle = "#E5E5EA";
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+          return;
+        }
+        let start = -Math.PI / 2;
+        slices.forEach((s) => {
+          if (s.value <= 0) return;
+          const ang = (s.value / total) * Math.PI * 2;
+          ctx.strokeStyle = s.color;
+          ctx.beginPath(); ctx.arc(cx, cy, r, start, start + ang); ctx.stroke();
+          start += ang;
+        });
       }
-      ctx.fillStyle = "#8E8E93"; ctx.font = "12px Arial"; ctx.textAlign = "center";
-      ctx.fillText("Total", cx, cy - 6);
-      ctx.fillStyle = "#1d1d1f"; ctx.font = "bold 15px Arial";
-      ctx.fillText(fmt(total), cx, cy + 14);
+
+      // ── Fila 1: total ingresos vs gastos ──
+      ctx.textAlign = "left"; ctx.fillStyle = "#1d1d1f"; ctx.font = "bold 15px Arial";
+      ctx.fillText("Ingresos y gastos", 16, 24);
+      donutArc(95, 100, 62, 24, [{ value: totalIncome, color: "#82B79A" }, { value: totalExpense, color: "#E0918A" }]);
+      ctx.textAlign = "center"; ctx.font = "11px Arial"; ctx.fillStyle = "#8E8E93";
+      ctx.fillText("Total", 95, 96);
+      ctx.font = "bold 14px Arial"; ctx.fillStyle = "#1d1d1f";
+      ctx.fillText(fmt(totalIncome + totalExpense), 95, 114);
       ctx.textAlign = "left";
-      const lx = cx + r + 34;
-      ctx.fillStyle = "#82B79A"; ctx.fillRect(lx, cy - 40, 13, 13);
-      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Ingresos", lx + 19, cy - 30);
-      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalIncome), lx + 19, cy - 12);
-      ctx.fillStyle = "#E0918A"; ctx.fillRect(lx, cy + 10, 13, 13);
-      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Gastos", lx + 19, cy + 20);
-      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalExpense), lx + 19, cy + 38);
+      const lx = 190;
+      ctx.fillStyle = "#82B79A"; ctx.fillRect(lx, 62, 13, 13);
+      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Ingresos", lx + 19, 73);
+      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalIncome), lx + 19, 92);
+      ctx.fillStyle = "#E0918A"; ctx.fillRect(lx, 112, 13, 13);
+      ctx.fillStyle = "#1d1d1f"; ctx.font = "600 12px Arial"; ctx.fillText("Gastos", lx + 19, 123);
+      ctx.font = "bold 14px Arial"; ctx.fillText(fmt(totalExpense), lx + 19, 142);
+
+      ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(16, 190); ctx.lineTo(W - 16, 190); ctx.stroke();
+
+      // ── Fila 2: desglose por categoría ──
+      function categoryBlock(x0, title, cats) {
+        ctx.textAlign = "left"; ctx.font = "bold 14px Arial"; ctx.fillStyle = "#1d1d1f";
+        ctx.fillText(title, x0, 216);
+        const top = cats.slice(0, 5);
+        donutArc(x0 + 55, 300, 50, 20, top.map((c) => ({ value: c.total, color: c.color })));
+        if (top.length === 0) {
+          ctx.font = "12px Arial"; ctx.fillStyle = "#8E8E93"; ctx.textAlign = "center";
+          ctx.fillText("Sin datos", x0 + 55, 304);
+        }
+        ctx.textAlign = "left";
+        top.forEach((c, i) => {
+          const ly = 236 + i * 42;
+          ctx.fillStyle = c.color; ctx.fillRect(x0 + 130, ly - 9, 10, 10);
+          ctx.fillStyle = "#1d1d1f"; ctx.font = "600 11px Arial";
+          const label = c.label.length > 16 ? c.label.slice(0, 15) + "…" : c.label;
+          ctx.fillText(label, x0 + 146, ly);
+          ctx.font = "11px Arial"; ctx.fillStyle = "#8E8E93";
+          ctx.fillText(fmt(c.total), x0 + 146, ly + 13);
+        });
+      }
+      categoryBlock(16, "Gastos por categoría", expByCat);
+      categoryBlock(W / 2 + 16, "Ingresos por categoría", incByCat);
+
       return { dataUrl: canvas.toDataURL("image/png"), width: W, height: H };
     }
 
@@ -257,6 +300,8 @@
       const toggle=(k)=>setSections(p=>({...p,[k]:!p[k]}));
       const anySelected=Object.values(sections).some(Boolean);
       const concept=(e)=>`${getCat(e.category).label} — ${e.description}`;
+      const byCat=(cl,et)=>cl.map(c=>({...c,total:entries.filter(e=>e.type===et&&e.category===c.id).reduce((s,e)=>s+e.amount,0)})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+      const expByCat=byCat(expCats,"expense"), incByCat=byCat(incCats,"income");
 
       // Precarga la librería del formato elegido en cuanto se abre/cambia, para que
       // generar el archivo al pulsar "Exportar" sea prácticamente instantáneo.
@@ -265,6 +310,15 @@
       const buildExcel=async()=>{
         await loadExcelJS();
         const wb=new ExcelJS.Workbook();
+        // Pestaña de gráficos SIEMPRE primera y activa por defecto al abrir el archivo,
+        // para que sea imposible pasarla por alto.
+        {
+          const ws=wb.addWorksheet("Gráfico");
+          const chart=buildFullChartsPNG(totalIncome,totalExpense,expByCat,incByCat);
+          const imgId=wb.addImage({base64:chart.dataUrl,extension:"png"});
+          ws.addImage(imgId,{tl:{col:0,row:0},ext:{width:chart.width,height:chart.height}});
+          ws.getColumn(1).width=4;
+        }
         if(sections.balance){
           const ws=wb.addWorksheet("Balance");
           ws.columns=[{width:22},{width:18}];
@@ -278,27 +332,23 @@
         if(sections.movimientos){
           const ws=wb.addWorksheet("Movimientos");
           ws.columns=[{width:12},{width:32},{width:14},{width:4},{width:12},{width:32},{width:14}];
-          const chart=buildIncomeExpenseChartPNG(totalIncome,totalExpense);
-          const imgId=wb.addImage({base64:chart.dataUrl,extension:"png"});
-          ws.addImage(imgId,{tl:{col:0,row:0},ext:{width:chart.width,height:chart.height}});
-          const top=12; // filas reservadas para el gráfico
-          const hRow=ws.getRow(top);
+          const hRow=ws.getRow(1);
           hRow.values=["Gastos","","","","Ingresos","",""];
-          ws.mergeCells(top,1,top,3); ws.mergeCells(top,5,top,7);
-          ws.getCell(top,1).font={bold:true,color:{argb:"FFE0918A"}};
-          ws.getCell(top,5).font={bold:true,color:{argb:"FF82B79A"}};
-          ws.getRow(top+1).values=["Fecha","Concepto","Importe","","Fecha","Concepto","Importe"];
-          ws.getRow(top+1).font={bold:true};
+          ws.mergeCells(1,1,1,3); ws.mergeCells(1,5,1,7);
+          ws.getCell(1,1).font={bold:true,color:{argb:"FFE0918A"}};
+          ws.getCell(1,5).font={bold:true,color:{argb:"FF82B79A"}};
+          ws.getRow(2).values=["Fecha","Concepto","Importe","","Fecha","Concepto","Importe"];
+          ws.getRow(2).font={bold:true};
           const expRows=entries.filter(e=>e.type==="expense");
           const incRows=entries.filter(e=>e.type==="income");
           const maxLen=Math.max(expRows.length,incRows.length);
           for(let i=0;i<maxLen;i++){
-            const row=ws.getRow(top+2+i);
+            const row=ws.getRow(3+i);
             const e=expRows[i], inc=incRows[i];
             if(e){ row.getCell(1).value=new Date(e.date).toLocaleDateString("es-ES"); row.getCell(2).value=concept(e); row.getCell(3).value=e.amount; }
             if(inc){ row.getCell(5).value=new Date(inc.date).toLocaleDateString("es-ES"); row.getCell(6).value=concept(inc); row.getCell(7).value=inc.amount; }
           }
-          if(maxLen===0) ws.getCell(top+2,1).value="Sin movimientos.";
+          if(maxLen===0) ws.getCell(3,1).value="Sin movimientos.";
           ws.getColumn(3).numFmt='#,##0.00" €"'; ws.getColumn(7).numFmt='#,##0.00" €"';
         }
         if(sections.estadisticas&&annualData.length>0){
@@ -323,13 +373,18 @@
         const pb=(n=30)=>{ if(y+n>doc.internal.pageSize.getHeight()-15){doc.addPage();y=15;} };
         doc.setFontSize(16);doc.setFont(undefined,"bold");doc.setTextColor(29,29,31);doc.text("Finanzas Personales",14,y);y+=8;
         doc.setFontSize(10);doc.setFont(undefined,"normal");doc.setTextColor(130,130,130);doc.text(`${MONTHS[month]} ${year}  ·  ${new Date().toLocaleDateString("es-ES")}`,14,y);y+=10;
+
+        // El gráfico siempre va primero, independientemente de qué secciones estén marcadas.
+        const chart=buildFullChartsPNG(totalIncome,totalExpense,expByCat,incByCat);
+        const imgW=W-28, imgH=imgW*(chart.height/chart.width);
+        pb(imgH+10);
+        doc.addImage(chart.dataUrl,"PNG",14,y,imgW,imgH,undefined,"MEDIUM");
+        y+=imgH+10;
+
         if(sections.balance){
-          pb(55);heading("Resumen");
-          const chart=buildIncomeExpenseChartPNG(totalIncome,totalExpense);
-          const imgW=88, imgH=imgW*(chart.height/chart.width);
-          doc.addImage(chart.dataUrl,"PNG",14,y,imgW,imgH);
-          doc.autoTable({startY:y,margin:{left:14+imgW+8,right:14},head:[["Concepto","Importe"]],body:[["Ingresos",fmt(totalIncome)],["Gastos",fmt(totalExpense)],["Balance",fmt(balance)]],headStyles:{fillColor:[29,29,31],textColor:255,fontSize:9},bodyStyles:{fontSize:9},columnStyles:{1:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]}});
-          y=Math.max(doc.lastAutoTable.finalY,y+imgH)+8;
+          pb(35);heading("Resumen");
+          doc.autoTable({startY:y,head:[["Concepto","Importe"]],body:[["Ingresos",fmt(totalIncome)],["Gastos",fmt(totalExpense)],["Balance",fmt(balance)]],headStyles:{fillColor:[29,29,31],textColor:255,fontSize:9},bodyStyles:{fontSize:9},columnStyles:{1:{halign:"right"}},alternateRowStyles:{fillColor:[245,245,247]},margin:{left:14,right:14}});
+          y=doc.lastAutoTable.finalY+8;
         }
         if(sections.movimientos){
           pb(40);heading("Movimientos");
@@ -450,11 +505,13 @@
                   <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{ICON_OPTIONS.map(ic=>(<button key={ic} style={{width:28,height:28,borderRadius:6,border:`2px solid ${icon===ic?"#007AFF":"transparent"}`,background:icon===ic?"#E8F0FF":"white",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setIcon(ic)}>{ic}</button>))}</div>
                 </div>
                 <div><div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Color</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:120,alignItems:"center"}}>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:150}}>
                     {PALETTE.map(col=>(<button key={col} style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${color===col?"#1d1d1f":"transparent"}`,background:col,cursor:"pointer"}} onClick={()=>setColor(col)}/>))}
-                    <label title="Color personalizado" style={{position:"relative",width:20,height:20,borderRadius:"50%",cursor:"pointer",border:`2px solid ${!PALETTE.includes(color)?"#1d1d1f":"transparent"}`,background:!PALETTE.includes(color)?color:"conic-gradient(red,yellow,lime,cyan,blue,magenta,red)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                      <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}}/>
-                    </label>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                    <span style={{fontSize:11,color:"#8E8E93"}}>Personalizado:</span>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} title="Elige cualquier color" style={{width:32,height:28,padding:2,border:`2px solid ${!PALETTE.includes(color)?"#1d1d1f":"rgba(0,0,0,0.16)"}`,borderRadius:6,cursor:"pointer",background:"white"}}/>
+                    {!PALETTE.includes(color)&&<span style={{fontFamily:"monospace",fontSize:11,color:"#8E8E93"}}>{color}</span>}
                   </div>
                 </div>
               </div>
