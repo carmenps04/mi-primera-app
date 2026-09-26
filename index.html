@@ -259,6 +259,16 @@
       { id:"other_in",   label:"Otros",       color:"#8E8E93", bg:"#F5F5F7", icon:"💰", custom:false },
     ];
 
+    const EMOJI_GROUPS = [
+      { label:"Dinero y compras", items:["💰","💳","💵","🏦","🛒","🎁","📦","🧾","💸","🪙"] },
+      { label:"Casa y hogar",     items:["🏠","🏢","🔑","💡","🛋️","🧺","🧹","🧴","🔧","🛠️"] },
+      { label:"Comida y bebida",  items:["🍽️","🍕","🍔","🍟","🍣","🍜","☕","🍺","🍷","🥗","🍇","🧀","🥑","🍰"] },
+      { label:"Transporte y viajes", items:["🚗","🚌","🚲","✈️","🏖️","🧳","⛽","🚆","🛵","🅿️"] },
+      { label:"Salud y bienestar", items:["💊","🏥","🩺","🧘","🏋️","🏃","⚽","🎾","🚴"] },
+      { label:"Ocio y educación", items:["🎬","🎮","🎧","🎵","🎨","📚","🎓","📱","💻","🎯"] },
+      { label:"Personas y naturaleza", items:["👔","🐶","🐱","🌿","🌸","🌳","☀️","🌙","⭐"] },
+    ];
+
     const MONTHS       = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
     const START_YEAR   = 2026;
@@ -482,7 +492,7 @@
     // ─── CatManagerModal ──────────────────────────────────────────────────────────
     function CatManagerModal({ type, expCats, incCats, onSave, onClose }) {
       const [list,setList]=useState(type==="expense"?expCats:incCats);
-      const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState("#007AFF"); const [err,setErr]=useState("");
+      const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState("#007AFF"); const [err,setErr]=useState(""); const [showEmojiPicker,setShowEmojiPicker]=useState(false);
       const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:genId(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor("#007AFF"); };
       return (
         <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
@@ -504,17 +514,21 @@
               <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
                 <div style={{flex:1,minWidth:120}}>
                   <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Icono</div>
-                  <input style={{...ms.inp,textAlign:"center",fontSize:18,padding:"4px 8px"}} value={icon} maxLength={8}
-                    placeholder="🙂" title="Pulsa aquí y abre el selector de emojis de tu teclado"
-                    onChange={e=>setIcon(e.target.value||"📦")}/>
-                  <div style={{fontSize:10,color:"#8E8E93",marginTop:3}}>Usa el teclado de emojis del dispositivo</div>
+                  <div style={{display:"flex",gap:6}}>
+                    <input style={{...ms.inp,width:40,textAlign:"center",fontSize:18,padding:"4px 0"}} value={icon} maxLength={8}
+                      placeholder="🙂" title="Escribe o pega un emoji con el teclado de tu dispositivo"
+                      onChange={e=>setIcon(e.target.value||"📦")}/>
+                    <button type="button" onClick={()=>setShowEmojiPicker(true)}
+                      style={{width:38,height:38,borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",fontSize:16,cursor:"pointer"}}>😀</button>
+                  </div>
+                  <div style={{fontSize:10,color:"#8E8E93",marginTop:3}}>Toca 😀 para elegir de una lista</div>
                 </div>
                 <div>
                   <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Color</div>
-                  <label style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",width:44,height:44,borderRadius:10,cursor:"pointer",background:/^#[0-9a-fA-F]{6}$/.test(color)?color:"#E5E5EA",border:"1.5px solid rgba(0,0,0,0.12)"}}>
-                    <span style={{fontSize:18,filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.35))"}}>🎨</span>
-                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} title="Elige un color" style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",border:"none",padding:0}}/>
-                  </label>
+                  <div style={{position:"relative",width:44,height:44}}>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} title="Elige un color" style={{width:"100%",height:"100%",padding:2,border:"1.5px solid rgba(0,0,0,0.12)",borderRadius:10,cursor:"pointer",background:"white"}}/>
+                    <span style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontSize:16,pointerEvents:"none",filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.6))"}}>🎨</span>
+                  </div>
                   <div style={{fontFamily:"monospace",fontSize:10,color:"#8E8E93",marginTop:3,textAlign:"center"}}>{color}</div>
                 </div>
               </div>
@@ -524,6 +538,34 @@
             <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
               <button style={ms.cancelBtn} onClick={onClose}>Cancelar</button>
               <button style={ms.saveBtn} onClick={()=>{onSave(type,list);onClose();}}>Guardar</button>
+            </div>
+          </div>
+          {showEmojiPicker&&<EmojiPickerModal onSelect={e=>{setIcon(e);setShowEmojiPicker(false);}} onClose={()=>setShowEmojiPicker(false)}/>}
+        </div>
+      );
+    }
+
+    // ─── EmojiPickerModal ─────────────────────────────────────────────────────────
+    // No hay forma de forzar el teclado de emojis del sistema desde una web: este panel
+    // ofrece una selección propia y amplia (no la totalidad de emojis existentes) que se
+    // abre directamente al tocar, sin depender de ajustes del dispositivo.
+    function EmojiPickerModal({ onSelect, onClose }) {
+      return (
+        <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
+          <div style={{...ms.modal,width:"min(360px,95vw)"}}>
+            <div style={ms.header}><span style={ms.title}>Elige un icono</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
+            <div style={{maxHeight:280,overflowY:"auto"}}>
+              {EMOJI_GROUPS.map(g=>(
+                <div key={g.label} style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#8E8E93",marginBottom:5}}>{g.label}</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                    {g.items.map(e=>(
+                      <button key={e} onClick={()=>onSelect(e)}
+                        style={{width:34,height:34,borderRadius:8,border:"1px solid rgba(0,0,0,0.06)",background:"#F9F9FB",fontSize:17,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{e}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
