@@ -259,8 +259,6 @@
       { id:"other_in",   label:"Otros",       color:"#8E8E93", bg:"#F5F5F7", icon:"💰", custom:false },
     ];
 
-    const PALETTE      = ["#FF6B6B","#FF9F0A","#FFD60A","#82B79A","#007AFF","#5AC8FA","#BF5AF2","#FF375F","#64D2FF","#30D158","#FF6961","#5E5CE6"];
-    const ICON_OPTIONS = ["📦","🏷️","⭐","🎯","🔧","🏃","🐾","🌿","🎨","🛒","✈️","🏖️","🎓","💡","🔑","🎵","🍕","☕","🏋️","💈","🚀","🌍","🎮","📱"];
     const MONTHS       = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
     const START_YEAR   = 2026;
@@ -284,8 +282,8 @@
     function genId() { return "c_" + Math.random().toString(36).slice(2) + Date.now().toString(36); }
     function fmt(n) { return new Intl.NumberFormat("es-ES",{style:"currency",currency:"EUR",minimumFractionDigits:2}).format(n); }
     function fmtShort(n) {
-      if (Math.abs(n)>=1000) return (n/1000).toFixed(1).replace(".",",")+" k €";
-      return n.toFixed(0)+" €";
+      if (Math.abs(n)>=1000) return (n/1000).toFixed(1).replace(".",",")+" k €";
+      return n.toFixed(0)+" €";
     }
     function getYears() { const y=[]; for(let i=START_YEAR;i<=END_YEAR;i++) y.push(i); return y; }
 
@@ -484,8 +482,8 @@
     // ─── CatManagerModal ──────────────────────────────────────────────────────────
     function CatManagerModal({ type, expCats, incCats, onSave, onClose }) {
       const [list,setList]=useState(type==="expense"?expCats:incCats);
-      const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState(PALETTE[0]); const [err,setErr]=useState("");
-      const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:genId(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor(PALETTE[0]); };
+      const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState("#007AFF"); const [err,setErr]=useState("");
+      const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:genId(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor("#007AFF"); };
       return (
         <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
           <div style={{...ms.modal,width:"min(420px,95vw)"}}>
@@ -503,20 +501,21 @@
             <div style={{background:"#F2F2F7",borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
               <div style={ms.sLbl}>Nueva categoría</div>
               <input style={ms.inp} placeholder="Nombre" value={lbl} onChange={e=>setLbl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()}/>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                <div style={{flex:1,minWidth:150}}>
+              <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                <div style={{flex:1,minWidth:120}}>
                   <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Icono</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:4}}>{ICON_OPTIONS.map(ic=>(<button key={ic} style={{width:28,height:28,borderRadius:6,border:`2px solid ${icon===ic?"#007AFF":"transparent"}`,background:icon===ic?"#E8F0FF":"white",cursor:"pointer",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setIcon(ic)}>{ic}</button>))}</div>
+                  <input style={{...ms.inp,textAlign:"center",fontSize:18,padding:"4px 8px"}} value={icon} maxLength={8}
+                    placeholder="🙂" title="Pulsa aquí y abre el selector de emojis de tu teclado"
+                    onChange={e=>setIcon(e.target.value||"📦")}/>
+                  <div style={{fontSize:10,color:"#8E8E93",marginTop:3}}>Usa el teclado de emojis del dispositivo</div>
                 </div>
-                <div><div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Color</div>
-                  <div style={{display:"flex",flexWrap:"wrap",gap:4,maxWidth:150}}>
-                    {PALETTE.map(col=>(<button key={col} style={{width:20,height:20,borderRadius:"50%",border:`2px solid ${color===col?"#1d1d1f":"transparent"}`,background:col,cursor:"pointer"}} onClick={()=>setColor(col)}/>))}
-                  </div>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
-                    <span style={{fontSize:11,color:"#8E8E93"}}>Personalizado:</span>
-                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} title="Elige cualquier color" style={{width:32,height:28,padding:2,border:`2px solid ${!PALETTE.includes(color)?"#1d1d1f":"rgba(0,0,0,0.16)"}`,borderRadius:6,cursor:"pointer",background:"white"}}/>
-                    {!PALETTE.includes(color)&&<span style={{fontFamily:"monospace",fontSize:11,color:"#8E8E93"}}>{color}</span>}
-                  </div>
+                <div>
+                  <div style={{fontSize:11,color:"#8E8E93",marginBottom:4}}>Color</div>
+                  <label style={{position:"relative",display:"flex",alignItems:"center",justifyContent:"center",width:44,height:44,borderRadius:10,cursor:"pointer",background:/^#[0-9a-fA-F]{6}$/.test(color)?color:"#E5E5EA",border:"1.5px solid rgba(0,0,0,0.12)"}}>
+                    <span style={{fontSize:18,filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.35))"}}>🎨</span>
+                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(color)?color:"#8E8E93"} onChange={e=>setColor(e.target.value)} title="Elige un color" style={{position:"absolute",inset:0,width:"100%",height:"100%",opacity:0,cursor:"pointer",border:"none",padding:0}}/>
+                  </label>
+                  <div style={{fontFamily:"monospace",fontSize:10,color:"#8E8E93",marginTop:3,textAlign:"center"}}>{color}</div>
                 </div>
               </div>
               {err&&<div style={{fontSize:12,color:"#E0918A"}}>{err}</div>}
@@ -700,8 +699,9 @@
         (()=>{ const pE=totalExpense/total,pI=totalIncome/total,dE=Math.max(0,pE*circ-gap),dI=Math.max(0,pI*circ-gap);
           return [{type:"expense",color:focus==="income"?"#FFCDD2":"#E0918A",dash:dE,space:circ-dE,offset:circ*1.25},
                   {type:"income", color:focus==="expense"?"#C8E6C9":"#82B79A",dash:dI,space:circ-dI,offset:circ*1.25-pE*circ}]; })();
-      const label=total===0?"Sin datos":focus==="expense"?fmt(totalExpense):focus==="income"?fmt(totalIncome):fmt(total);
-      const sub=focus==="expense"?"Gastos":focus==="income"?"Ingresos":"Total";
+      const leader=totalIncome>=totalExpense?"income":"expense"; // en empate, prevalece Ingresos
+      const label=total===0?"Sin datos":focus==="expense"?fmt(totalExpense):focus==="income"?fmt(totalIncome):(leader==="income"?fmt(totalIncome):fmt(totalExpense));
+      const sub=focus==="expense"?"Gastos":focus==="income"?"Ingresos":(leader==="income"?"Ingresos":"Gastos");
       const sw=Math.round(DIM*0.123);
       return (
         <svg width={DIM} height={DIM} viewBox={`0 0 ${DIM} ${DIM}`} style={{flexShrink:0}}>
@@ -813,6 +813,7 @@
       const [type,setType]=useState("expense");
       const [desc,setDesc]=useState(""); const [amt,setAmt]=useState(""); const [cat,setCat]=useState("food"); const [err,setErr]=useState("");
       const [view,setView]=useState("dashboard"); const [focus,setFocus]=useState(null);
+      const [listStage,setListStage]=useState("type"); const [listType,setListType]=useState("expense"); const [listCat,setListCat]=useState(null);
       const [editing,setEditing]=useState(null); const [manageCat,setManageCat]=useState(null);
       const [showExport,setShowExport]=useState(false);
       const [dying,setDying]=useState(null); const [added,setAdded]=useState(null);
@@ -962,10 +963,10 @@
           {/* Toolbar */}
           <div style={{background:"rgba(246,246,246,0.97)",backdropFilter:"blur(20px)",borderBottom:"1px solid rgba(0,0,0,0.08)",flexShrink:0,display:"flex",flexDirection:isMobile?"column":"row",alignItems:isMobile?"stretch":"center",justifyContent:"space-between",padding:isMobile?"8px 12px":"0 16px",gap:isMobile?8:0,minHeight:isMobile?"auto":46,minWidth:0}}>
             <div style={{display:"flex",gap:8,alignItems:"center",minWidth:0}}>
-              <select style={{height:34,padding:"0 24px 0 10px",borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238E8E93'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 8px center",fontSize:14,fontFamily:"inherit",color:"#1d1d1f",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}} value={month} onChange={e=>{setMonth(+e.target.value);setFocus(null);}}>
+              <select style={{height:34,padding:"0 24px 0 10px",borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238E8E93'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 8px center",fontSize:14,fontFamily:"inherit",color:"#1d1d1f",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}} value={month} onChange={e=>{setMonth(+e.target.value);setFocus(null);setListStage("type");}}>
                 {MONTHS.map((m,i)=><option key={i} value={i}>{m}</option>)}
               </select>
-              <select style={{height:34,padding:"0 24px 0 10px",borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238E8E93'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 8px center",fontSize:14,fontFamily:"inherit",color:"#1d1d1f",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}} value={year} onChange={e=>{setYear(+e.target.value);setFocus(null);}}>
+              <select style={{height:34,padding:"0 24px 0 10px",borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",backgroundImage:"url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238E8E93'/%3E%3C/svg%3E\")",backgroundRepeat:"no-repeat",backgroundPosition:"right 8px center",fontSize:14,fontFamily:"inherit",color:"#1d1d1f",cursor:"pointer",appearance:"none",WebkitAppearance:"none"}} value={year} onChange={e=>{setYear(+e.target.value);setFocus(null);setListStage("type");}}>
                 {YEARS.map(y=><option key={y} value={y}>{y}</option>)}
               </select>
             </div>
@@ -983,7 +984,7 @@
               {[{v:"dashboard",icon:"🏠",l:"Inicio"},{v:"list",icon:"📋",l:"Movimientos"},{v:"stats",icon:"📊",l:"Estadísticas"}].map(({v,icon,l})=>(
                 <button key={v} className={`tab-btn${view===v?" tab-active":""}`}
                   style={{flex:isMobile?1:"none",flexDirection:isMobile?"column":"row",padding:isMobile?"6px 4px":"4px 14px",gap:isMobile?2:5,minWidth:0}}
-                  onClick={()=>setView(v)}>
+                  onClick={()=>{setView(v);if(v==="list")setListStage("type");}}>
                   <span style={{fontSize:isMobile?15:13}}>{icon}</span>
                   <span style={{fontSize:isMobile?10:12,whiteSpace:"nowrap"}}>{l}</span>
                 </button>
@@ -994,7 +995,8 @@
           {/* Contenido */}
           <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",padding:isMobile?"10px 10px 0":"14px 16px 0",gap:isMobile?10:12}}>
 
-            {/* Formulario */}
+            {/* Formulario — solo en Inicio */}
+            {view==="dashboard"&&(
             <div style={{background:"white",borderRadius:12,padding:isMobile?"12px":"14px 16px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",flexShrink:0}}>
               <div style={{display:"flex",gap:8,marginBottom:10}}>
                 {["expense","income"].map(t=>(
@@ -1020,6 +1022,7 @@
                 </button>
               </div>
             </div>
+            )}
 
             {/* DASHBOARD */}
             {view==="dashboard"&&(
@@ -1108,24 +1111,75 @@
             {/* MOVIMIENTOS */}
             {view==="list"&&(
               <div style={{flex:1,overflowY:"auto",paddingBottom:16}}>
-                {loading?<Empty icon="⏳" text="Cargando..."/>
-                 :entries.length===0?<Empty icon="💶" text="Sin movimientos registrados"/>
-                 :entries.map(exp=>{ const c=getCat(exp.category); return (
-                  <div key={exp.id} className={`expense-row${dying===exp.id?" dying":""}${added===exp.id?" added":""}`}
-                    style={{display:"flex",alignItems:"center",gap:10,background:"white",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 3px rgba(0,0,0,0.05)",cursor:"pointer",marginBottom:6}}
-                    onClick={()=>setEditing(exp)}>
-                    <div style={{width:36,height:36,borderRadius:9,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{c.icon}</div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:13,fontWeight:500,color:"#1d1d1f",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{exp.description}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:5,marginTop:2,flexWrap:"wrap"}}>
-                        <span style={{fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:4,background:c.bg,color:c.color}}>{c.label}</span>
-                        <span style={{color:"#8E8E93",fontSize:11}}>{new Date(exp.date).toLocaleDateString("es-ES",{day:"2-digit",month:"short"})}</span>
+                {loading?<Empty icon="⏳" text="Cargando..."/>:(
+                <>
+                {/* Nivel 1: Ingresos / Gastos */}
+                {listStage==="type"&&(
+                  <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                    {[{key:"income",label:"Ingresos",color:"#82B79A",total:totalIncome,n:incByCat.reduce((s,c)=>s+c.count,0)},
+                      {key:"expense",label:"Gastos",color:"#E0918A",total:totalExpense,n:expByCat.reduce((s,c)=>s+c.count,0)}].map(g=>(
+                      <div key={g.key} onClick={()=>{setListType(g.key);setListStage("category");}}
+                        style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"white",borderRadius:12,padding:"16px 18px",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                        <div>
+                          <div style={{fontSize:15,fontWeight:700,color:"#1d1d1f"}}>{g.label}</div>
+                          <div style={{fontSize:11,color:"#8E8E93",marginTop:2}}>{g.n} mov.</div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:15,fontWeight:700,color:g.color}}>{fmt(g.total)}</span>
+                          <span style={{color:"#C7C7CC",fontSize:15}}>›</span>
+                        </div>
                       </div>
-                    </div>
-                    <div style={{fontSize:13,fontWeight:700,color:exp.type==="expense"?"#E0918A":"#82B79A",whiteSpace:"nowrap"}}>{exp.type==="expense"?"-":"+"}  {fmt(exp.amount)}</div>
-                    <div style={{color:"#C7C7CC",fontSize:13,flexShrink:0}}>✎</div>
+                    ))}
                   </div>
-                );})}
+                )}
+
+                {/* Nivel 2: categorías del tipo elegido */}
+                {listStage==="category"&&(()=>{ const cats=listType==="expense"?expByCat:incByCat; return (
+                  <>
+                    <button onClick={()=>setListStage("type")} style={{background:"none",border:"none",color:"#007AFF",fontSize:13,fontWeight:600,padding:"4px 0 10px",cursor:"pointer",fontFamily:"inherit"}}>‹ Ingresos / Gastos</button>
+                    {cats.length===0?<Empty icon="💶" text="Sin movimientos en esta sección"/>:cats.map(c=>(
+                      <div key={c.id} onClick={()=>{setListCat(c.id);setListStage("entries");}}
+                        style={{display:"flex",alignItems:"center",gap:10,background:"white",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 3px rgba(0,0,0,0.05)",cursor:"pointer",marginBottom:6}}>
+                        <div style={{width:36,height:36,borderRadius:9,background:c.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>{c.icon}</div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:"#1d1d1f"}}>{c.label}</div>
+                          <div style={{fontSize:11,color:"#8E8E93",marginTop:1}}>{c.count} mov.</div>
+                        </div>
+                        <span style={{fontSize:13,fontWeight:700,color:listType==="expense"?"#E0918A":"#82B79A"}}>{fmt(c.total)}</span>
+                        <span style={{color:"#C7C7CC",fontSize:13}}>›</span>
+                      </div>
+                    ))}
+                  </>
+                );})()}
+
+                {/* Nivel 3: movimientos de la categoría elegida */}
+                {listStage==="entries"&&(()=>{
+                  const cat=getCat(listCat);
+                  const list=entries.filter(e=>e.type===listType&&e.category===listCat);
+                  return (
+                    <>
+                      <button onClick={()=>setListStage("category")} style={{background:"none",border:"none",color:"#007AFF",fontSize:13,fontWeight:600,padding:"4px 0 10px",cursor:"pointer",fontFamily:"inherit"}}>‹ {listType==="expense"?"Gastos":"Ingresos"}</button>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                        <span style={{fontSize:16}}>{cat.icon}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"#1d1d1f"}}>{cat.label}</span>
+                      </div>
+                      {list.length===0?<Empty icon="💶" text="Sin movimientos en esta categoría"/>:list.map(exp=>(
+                        <div key={exp.id} className={`expense-row${dying===exp.id?" dying":""}${added===exp.id?" added":""}`}
+                          style={{display:"flex",alignItems:"center",gap:10,background:"white",borderRadius:10,padding:"10px 12px",boxShadow:"0 1px 3px rgba(0,0,0,0.05)",cursor:"pointer",marginBottom:6}}
+                          onClick={()=>setEditing(exp)}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:13,fontWeight:500,color:"#1d1d1f",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{exp.description}</div>
+                            <div style={{color:"#8E8E93",fontSize:11,marginTop:2}}>{new Date(exp.date).toLocaleDateString("es-ES",{day:"2-digit",month:"short"})}</div>
+                          </div>
+                          <div style={{fontSize:13,fontWeight:700,color:exp.type==="expense"?"#E0918A":"#82B79A",whiteSpace:"nowrap"}}>{exp.type==="expense"?"-":"+"}  {fmt(exp.amount)}</div>
+                          <div style={{color:"#C7C7CC",fontSize:13,flexShrink:0}}>✎</div>
+                        </div>
+                      ))}
+                    </>
+                  );
+                })()}
+                </>
+                )}
               </div>
             )}
 
