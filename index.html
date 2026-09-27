@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Finanzas Personales</title>
 
   <!-- PWA: manifest + tema -->
@@ -260,13 +260,15 @@
     ];
 
     const EMOJI_GROUPS = [
-      { label:"Dinero y compras", items:["💰","💳","💵","🏦","🛒","🎁","📦","🧾","💸","🪙"] },
-      { label:"Casa y hogar",     items:["🏠","🏢","🔑","💡","🛋️","🧺","🧹","🧴","🔧","🛠️"] },
-      { label:"Comida y bebida",  items:["🍽️","🍕","🍔","🍟","🍣","🍜","☕","🍺","🍷","🥗","🍇","🧀","🥑","🍰"] },
-      { label:"Transporte y viajes", items:["🚗","🚌","🚲","✈️","🏖️","🧳","⛽","🚆","🛵","🅿️"] },
-      { label:"Salud y bienestar", items:["💊","🏥","🩺","🧘","🏋️","🏃","⚽","🎾","🚴"] },
-      { label:"Ocio y educación", items:["🎬","🎮","🎧","🎵","🎨","📚","🎓","📱","💻","🎯"] },
-      { label:"Personas y naturaleza", items:["👔","🐶","🐱","🌿","🌸","🌳","☀️","🌙","⭐"] },
+      { label:"Caras y personas", items:["😀","😃","😄","😁","😆","😅","🙂","😉","😊","😍","🤩","😘","😜","🤔","😐","😴","🥱","😢","😭","😡","🥳","😎","🤗","🙄","😱","🥺","👍","👎","👏","🙏","💪","🤝","👋","❤️","💔","💯"] },
+      { label:"Dinero y compras", items:["💰","💳","💵","💶","💴","💷","🏦","🛒","🛍️","🎁","📦","🧾","💸","🪙","💲","📈","📉","🧮"] },
+      { label:"Casa y hogar", items:["🏠","🏡","🏢","🏬","🔑","🔒","💡","🛋️","🛏️","🚪","🪟","🧺","🧹","🧼","🧴","🧽","🔧","🛠️","🔨","🪛","📐"] },
+      { label:"Comida y bebida", items:["🍽️","🍕","🍔","🌭","🌮","🌯","🥪","🍟","🍗","🍖","🥩","🥓","🍳","🥞","🧇","🍣","🍱","🍜","🍲","🥘","🍚","🍞","🥐","🧀","🥑","🥗","🍇","🍉","🍓","🍒","🍑","🍎","🍌","🍍","🥭","☕","🍵","🧃","🥤","🍺","🍷","🥂","🍸","🍫","🍩","🍰","🎂","🍪","🍦"] },
+      { label:"Transporte y viajes", items:["🚗","🚕","🚙","🚌","🚎","🏍️","🚲","🛴","🚆","🚄","🚇","✈️","🛫","🚢","⛵","🚤","🅿️","⛽","🚦","🗺️","🧳","🏖️","🏝️","🏔️","⛺","🗼","🗽","🏰"] },
+      { label:"Salud y bienestar", items:["💊","💉","🩺","🏥","🩹","🧠","🦷","🧘","🧘‍♀️","🏋️","🏋️‍♀️","🏃","🏃‍♀️","🚴","🚴‍♀️","⚽","🏀","🏈","🎾","🏐","🏓","🥊","🧗","🏊","🚶"] },
+      { label:"Ocio y educación", items:["🎬","🎮","🕹️","🎧","🎵","🎶","🎹","🎸","🎨","🖌️","📚","📖","🎓","✏️","📝","📱","💻","⌨️","🖥️","🖱️","🎯","🎲","♟️","🧩","🎭","🎤","📷","🎁"] },
+      { label:"Naturaleza y clima", items:["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🐔","🐧","🐦","🦆","🦉","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐢","🐍","🦎","🐳","🐬","🐠","🌵","🌲","🌳","🌴","🌱","🌿","☘️","🍀","🌸","🌺","🌻","🌞","🌝","☀️","🌤️","⛅","☁️","🌧️","⛈️","❄️","🌈","🌙","⭐","✨"] },
+      { label:"Símbolos y otros", items:["✅","❌","⚠️","🔔","🔕","🔥","💧","⏰","⌛","📅","📌","📍","🔗","🏷️","🔖","🆗","🆕","❓","❗","♻️","🔄","➕","➖","✖️","➗","🟢","🟡","🟠","🔴","🔵","🟣","⚫","⚪"] },
     ];
 
     const MONTHS       = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
@@ -493,21 +495,64 @@
     function CatManagerModal({ type, expCats, incCats, onSave, onClose }) {
       const [list,setList]=useState(type==="expense"?expCats:incCats);
       const [lbl,setLbl]=useState(""); const [icon,setIcon]=useState("📦"); const [color,setColor]=useState("#007AFF"); const [err,setErr]=useState(""); const [showEmojiPicker,setShowEmojiPicker]=useState(false);
+      const [editingId,setEditingId]=useState(null); const [eLbl,setELbl]=useState(""); const [eIcon,setEIcon]=useState(""); const [eColor,setEColor]=useState(""); const [eShowEmoji,setEShowEmoji]=useState(false); const [eErr,setEErr]=useState("");
+      const [listErr,setListErr]=useState("");
+      const removeCat=(id)=>{
+        if(list.length<=1){setListErr("Debe quedar al menos una categoría.");return;}
+        setListErr("");
+        setList(l=>l.filter(x=>x.id!==id));
+        if(editingId===id) setEditingId(null);
+      };
+      const startEdit=(c)=>{ setEditingId(c.id); setELbl(c.label); setEIcon(c.icon); setEColor(c.color); setEErr(""); };
+      const saveEdit=()=>{
+        if(!eLbl.trim()){setEErr("Escribe un nombre.");return;}
+        if(list.find(c=>c.id!==editingId&&c.label.toLowerCase()===eLbl.trim().toLowerCase())){setEErr("Ya existe.");return;}
+        setList(l=>l.map(c=>c.id===editingId?{...c,label:eLbl.trim(),icon:eIcon||"📦",color:eColor,bg:eColor+"22"}:c));
+        setEditingId(null);
+      };
       const add=()=>{ if(!lbl.trim()){setErr("Escribe un nombre.");return;} if(list.find(c=>c.label.toLowerCase()===lbl.trim().toLowerCase())){setErr("Ya existe.");return;} setErr(""); setList(l=>[...l,{id:genId(),label:lbl.trim(),color,bg:color+"22",icon,custom:true}]); setLbl("");setIcon("📦");setColor("#007AFF"); };
       return (
         <div style={ms.overlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
           <div style={{...ms.modal,width:"min(420px,95vw)"}}>
             <div style={ms.header}><span style={ms.title}>Categorías de {type==="expense"?"gastos":"ingresos"}</span><button style={ms.xBtn} onClick={onClose}>✕</button></div>
             <div style={{maxHeight:190,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>
-              {list.map(c=>(
+              {list.map(c=>editingId===c.id?(
+                <div key={c.id} style={{background:"#F2F2F7",borderRadius:10,padding:"10px",display:"flex",flexDirection:"column",gap:8}}>
+                  <input style={ms.inp} placeholder="Nombre" value={eLbl} onChange={e=>setELbl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveEdit()}/>
+                  <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+                    <div style={{flex:1,minWidth:100}}>
+                      <div style={{fontSize:10,color:"#8E8E93",marginBottom:3}}>Icono</div>
+                      <div style={{display:"flex",gap:6}}>
+                        <input style={{...ms.inp,width:38,textAlign:"center",fontSize:16,padding:"4px 0"}} value={eIcon} maxLength={8} onChange={e=>setEIcon(e.target.value)}/>
+                        <button type="button" onClick={()=>setEShowEmoji(true)} style={{width:36,height:34,borderRadius:8,border:"1px solid rgba(0,0,0,0.16)",background:"white",fontSize:15,cursor:"pointer"}}>😀</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:"#8E8E93",marginBottom:3}}>Color</div>
+                      <div style={{position:"relative",width:40,height:40}}>
+                        <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(eColor)?eColor:"#8E8E93"} onChange={e=>setEColor(e.target.value)} style={{width:"100%",height:"100%",padding:2,border:"1.5px solid rgba(0,0,0,0.12)",borderRadius:9,cursor:"pointer",background:"white"}}/>
+                        <span style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",fontSize:14,pointerEvents:"none",filter:"drop-shadow(0 1px 2px rgba(0,0,0,0.6))"}}>🎨</span>
+                      </div>
+                    </div>
+                  </div>
+                  {eErr&&<div style={{fontSize:11,color:"#E0918A"}}>{eErr}</div>}
+                  <div style={{display:"flex",justifyContent:"flex-end",gap:6}}>
+                    <button style={ms.cancelBtn} onClick={()=>setEditingId(null)}>Cancelar</button>
+                    <button style={ms.saveBtn} onClick={saveEdit}>Guardar</button>
+                  </div>
+                  {eShowEmoji&&<EmojiPickerModal onSelect={e=>{setEIcon(e);setEShowEmoji(false);}} onClose={()=>setEShowEmoji(false)}/>}
+                </div>
+              ):(
                 <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:"#F9F9FB",borderRadius:8,border:"1px solid rgba(0,0,0,0.06)"}}>
                   <span style={{fontSize:18}}>{c.icon}</span>
                   <div style={{width:10,height:10,borderRadius:"50%",background:c.color,flexShrink:0}}/>
                   <span style={{flex:1,fontSize:13,fontWeight:500,color:"#1d1d1f"}}>{c.label}</span>
-                  {c.custom?<button style={ms.removeCatBtn} onClick={()=>setList(l=>l.filter(x=>x.id!==c.id))}>Eliminar</button>:<span style={{fontSize:10,color:"#C7C7CC"}}>predeterminada</span>}
+                  <button style={{...ms.removeCatBtn,background:"white",color:"#007AFF",borderColor:"rgba(0,122,255,0.3)"}} onClick={()=>startEdit(c)}>Editar</button>
+                  <button style={ms.removeCatBtn} onClick={()=>removeCat(c.id)}>Eliminar</button>
                 </div>
               ))}
             </div>
+            {listErr&&<div style={{fontSize:11,color:"#E0918A"}}>{listErr}</div>}
             <div style={{background:"#F2F2F7",borderRadius:12,padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
               <div style={ms.sLbl}>Nueva categoría</div>
               <input style={ms.inp} placeholder="Nombre" value={lbl} onChange={e=>setLbl(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()}/>
@@ -961,7 +1006,15 @@
       const totalExpense=entries.filter(e=>e.type==="expense").reduce((s,e)=>s+e.amount,0);
       const totalIncome=entries.filter(e=>e.type==="income").reduce((s,e)=>s+e.amount,0);
       const balance=totalIncome-totalExpense;
-      const byCat=(cl,et)=>cl.map(c=>({...c,total:entries.filter(e=>e.type===et&&e.category===c.id).reduce((s,e)=>s+e.amount,0),count:entries.filter(e=>e.type===et&&e.category===c.id).length})).filter(c=>c.total>0).sort((a,b)=>b.total-a.total);
+      const byCat=(cl,et)=>{
+        const known=cl.map(c=>({...c,total:entries.filter(e=>e.type===et&&e.category===c.id).reduce((s,e)=>s+e.amount,0),count:entries.filter(e=>e.type===et&&e.category===c.id).length})).filter(c=>c.total>0);
+        const orphanIds=new Set(cl.map(c=>c.id));
+        const orphanEntries=entries.filter(e=>e.type===et&&!orphanIds.has(e.category));
+        const withOrphans=orphanEntries.length>0
+          ? [...known,{id:"__sin_categoria__",label:"Sin categoría",icon:"❓",color:"#8E8E93",bg:"#F5F5F7",custom:false,total:orphanEntries.reduce((s,e)=>s+e.amount,0),count:orphanEntries.length}]
+          : known;
+        return withOrphans.sort((a,b)=>b.total-a.total);
+      };
       const expByCat=byCat(expCats,"expense"), incByCat=byCat(incCats,"income");
       const focusedByCat=focus==="expense"?expByCat:incByCat, focusedTotal=focus==="expense"?totalExpense:totalIncome;
       const focusedLabel=focus==="expense"?"Gastos":"Ingresos", focusedColor=focus==="expense"?"#E0918A":"#82B79A";
@@ -1196,8 +1249,10 @@
 
                 {/* Nivel 3: movimientos de la categoría elegida */}
                 {listStage==="entries"&&(()=>{
-                  const cat=getCat(listCat);
-                  const list=entries.filter(e=>e.type===listType&&e.category===listCat);
+                  const isOrphanGroup=listCat==="__sin_categoria__";
+                  const knownIds=new Set((listType==="expense"?expCats:incCats).map(c=>c.id));
+                  const cat=isOrphanGroup?{icon:"❓",label:"Sin categoría"}:getCat(listCat);
+                  const list=entries.filter(e=>e.type===listType&&(isOrphanGroup?!knownIds.has(e.category):e.category===listCat));
                   return (
                     <>
                       <button onClick={()=>setListStage("category")} style={{background:"none",border:"none",color:"#007AFF",fontSize:13,fontWeight:600,padding:"4px 0 10px",cursor:"pointer",fontFamily:"inherit"}}>‹ {listType==="expense"?"Gastos":"Ingresos"}</button>
@@ -1274,6 +1329,10 @@
       ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 4px; }
       input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
       input:focus, select:focus { outline: none; border-color: #007AFF !important; box-shadow: 0 0 0 3px rgba(0,122,255,0.14) !important; }
+      /* iOS hace zoom automático al enfocar un campo con fuente <16px; esto lo evita en móvil sin cambiar el tamaño visual en escritorio */
+      @media (max-width: 640px) {
+        input, select, textarea { font-size: 16px !important; }
+      }
 
       .share-btn {
         width: 32px; height: 32px; border-radius: 8px; border: none;
